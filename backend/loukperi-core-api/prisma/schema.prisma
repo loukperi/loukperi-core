@@ -1,0 +1,659 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Workspace {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  name                   String
+  slug                   String                  @unique @db.Citext
+  companyName            String?                 @map("company_name")
+  timezone               String                  @default("Europe/Athens")
+  locale                 String                  @default("el-GR")
+  logoUrl                String?                 @map("logo_url")
+  primaryColor           String?                 @map("primary_color")
+  secondaryColor         String?                 @map("secondary_color")
+  isActive               Boolean                 @default(true) @map("is_active")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  settings               WorkspaceSettings?
+  workspaceUserRoles     WorkspaceUserRole[]
+  users                  WorkspaceUser[]
+  roles                  Role[]
+  rolePermissions        RolePermission[]
+  recordTypes            RecordType[]
+  statuses               StatusDefinition[]
+  tags                   Tag[]
+  accounts               Account[]
+  contacts               Contact[]
+  records                Record[]
+  recordRelations        RecordRelation[]
+  customFieldDefinitions CustomFieldDefinition[]
+  customFieldValues      CustomFieldValue[]
+  tasks                  Task[]
+  notes                  Note[]
+  fileAttachments        FileAttachment[]
+  activityEvents         ActivityEvent[]
+  dashboardConfigs       DashboardConfig[]
+  dashboardWidgets       DashboardWidget[]
+  savedReports           SavedReport[]
+  savedViews             SavedView[]
+  notificationRules      NotificationRule[]
+  notifications          Notification[]
+  integrations           Integration[]
+  syncJobs               SyncJob[]
+  externalEntityLinks    ExternalEntityLink[]
+  tagAssignments         TagAssignment[]
+
+  @@map("workspaces")
+}
+
+model WorkspaceSettings {
+  id                         String    @id @default(uuid()) @db.Uuid
+  workspaceId                String    @unique @map("workspace_id") @db.Uuid
+  defaultRecordLabelSingular String    @default("Record") @map("default_record_label_singular")
+  defaultRecordLabelPlural   String    @default("Records") @map("default_record_label_plural")
+  dateFormat                 String    @default("DD/MM/YYYY") @map("date_format")
+  currencyCode               String    @default("EUR") @map("currency_code")
+  numberFormat               String    @default("el-GR") @map("number_format")
+  featuresJsonb              Json      @default("{}") @map("features_jsonb")
+  createdAt                  DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt                  DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace                  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("workspace_settings")
+}
+
+model User {
+  id                    String           @id @default(uuid()) @db.Uuid
+  email                 String           @unique @db.Citext
+  passwordHash          String           @map("password_hash")
+  firstName             String           @map("first_name")
+  lastName              String           @map("last_name")
+  phone                 String?
+  isActive              Boolean          @default(true) @map("is_active")
+  lastLoginAt           DateTime?        @map("last_login_at") @db.Timestamptz(6)
+  memberships           WorkspaceUser[]
+  ownedAccounts         Account[]        @relation("AccountOwner")
+  ownedRecords          Record[]         @relation("RecordOwner")
+  assignedRecords       Record[]         @relation("RecordAssignee")
+  assignedTasks         Task[]           @relation("TaskAssignee")
+  createdTasks          Task[]           @relation("TaskCreator")
+  notesAuthored         Note[]           @relation("NoteAuthor")
+  filesUploaded         FileAttachment[] @relation("FileUploader")
+  activityAsActor       ActivityEvent[]  @relation("ActivityActor")
+  createdReports        SavedReport[]    @relation("ReportCreator")
+  createdViews          SavedView[]      @relation("ViewCreator")
+  receivedNotifications Notification[]
+  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+
+  @@map("users")
+}
+
+model WorkspaceUser {
+  id          String              @id @default(uuid()) @db.Uuid
+  workspaceId String              @map("workspace_id") @db.Uuid
+  userId      String              @map("user_id") @db.Uuid
+  status      String              @default("active")
+  jobTitle    String?             @map("job_title")
+  avatarUrl   String?             @map("avatar_url")
+  isOwner     Boolean             @default(false) @map("is_owner")
+  createdAt   DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User                @relation(fields: [userId], references: [id], onDelete: Cascade)
+  roles       WorkspaceUserRole[]
+
+  @@unique([workspaceId, userId])
+  @@index([workspaceId, status])
+  @@map("workspace_users")
+}
+
+model Role {
+  id              String              @id @default(uuid()) @db.Uuid
+  workspaceId     String              @map("workspace_id") @db.Uuid
+  name            String
+  code            String
+  description     String?
+  isSystemRole    Boolean             @default(false) @map("is_system_role")
+  createdAt       DateTime            @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime            @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace           @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceUsers  WorkspaceUserRole[]
+  rolePermissions RolePermission[]
+
+  @@unique([workspaceId, code])
+  @@map("roles")
+}
+
+model Permission {
+  id              String           @id @default(uuid()) @db.Uuid
+  code            String           @unique
+  name            String
+  description     String?
+  module          String
+  createdAt       DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  rolePermissions RolePermission[]
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  id           String     @id @default(uuid()) @db.Uuid
+  workspaceId  String     @map("workspace_id") @db.Uuid
+  roleId       String     @map("role_id") @db.Uuid
+  permissionId String     @map("permission_id") @db.Uuid
+  createdAt    DateTime   @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime   @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace  @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, roleId, permissionId])
+  @@map("role_permissions")
+}
+
+model WorkspaceUserRole {
+  id              String        @id @default(uuid()) @db.Uuid
+  workspaceId     String        @map("workspace_id") @db.Uuid
+  workspaceUserId String        @map("workspace_user_id") @db.Uuid
+  roleId          String        @map("role_id") @db.Uuid
+  createdAt       DateTime      @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime      @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  workspaceUser   WorkspaceUser @relation(fields: [workspaceUserId], references: [id], onDelete: Cascade)
+  role            Role          @relation(fields: [roleId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, workspaceUserId, roleId])
+  @@map("workspace_user_roles")
+}
+
+model RecordType {
+  id                     String                  @id @default(uuid()) @db.Uuid
+  workspaceId            String                  @map("workspace_id") @db.Uuid
+  key                    String
+  singularLabel          String                  @map("singular_label")
+  pluralLabel            String                  @map("plural_label")
+  description            String?
+  icon                   String?
+  isActive               Boolean                 @default(true) @map("is_active")
+  createdAt              DateTime                @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt              DateTime                @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace              Workspace               @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  records                Record[]
+  statuses               StatusDefinition[]
+  customFieldDefinitions CustomFieldDefinition[]
+
+  @@unique([workspaceId, key])
+  @@map("record_types")
+}
+
+model StatusDefinition {
+  id           String      @id @default(uuid()) @db.Uuid
+  workspaceId  String      @map("workspace_id") @db.Uuid
+  entityType   String      @map("entity_type")
+  recordTypeId String?     @map("record_type_id") @db.Uuid
+  key          String
+  label        String
+  color        String?
+  sortOrder    Int         @default(0) @map("sort_order")
+  isDefault    Boolean     @default(false) @map("is_default")
+  isTerminal   Boolean     @default(false) @map("is_terminal")
+  createdAt    DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recordType   RecordType? @relation(fields: [recordTypeId], references: [id], onDelete: Cascade)
+  records      Record[]
+
+  @@unique([workspaceId, entityType, recordTypeId, key])
+  @@map("status_definitions")
+}
+
+model Tag {
+  id             String          @id @default(uuid()) @db.Uuid
+  workspaceId    String          @map("workspace_id") @db.Uuid
+  name           String
+  color          String?
+  entityType     String          @map("entity_type")
+  createdAt      DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tagAssignments TagAssignment[]
+
+  @@unique([workspaceId, entityType, name])
+  @@map("tags")
+}
+
+model Account {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  name             String
+  code             String?
+  accountType      String?   @map("account_type")
+  vatNumber        String?   @map("vat_number")
+  email            String?   @db.Citext
+  phone            String?
+  website          String?
+  addressLine1     String?   @map("address_line_1")
+  addressLine2     String?   @map("address_line_2")
+  city             String?
+  postalCode       String?   @map("postal_code")
+  country          String?
+  status           String    @default("active")
+  ownerUserId      String?   @map("owner_user_id") @db.Uuid
+  sourceSystem     String?   @map("source_system")
+  sourceExternalId String?   @map("source_external_id")
+  metadataJsonb    Json      @default("{}") @map("metadata_jsonb")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  ownerUser        User?     @relation("AccountOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  contacts         Contact[]
+  records          Record[]
+
+  @@index([workspaceId, name])
+  @@index([workspaceId, email])
+  @@map("accounts")
+}
+
+model Contact {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  accountId        String    @map("account_id") @db.Uuid
+  firstName        String    @map("first_name")
+  lastName         String    @map("last_name")
+  email            String?   @db.Citext
+  phone            String?
+  jobTitle         String?   @map("job_title")
+  isPrimary        Boolean   @default(false) @map("is_primary")
+  status           String    @default("active")
+  sourceSystem     String?   @map("source_system")
+  sourceExternalId String?   @map("source_external_id")
+  metadataJsonb    Json      @default("{}") @map("metadata_jsonb")
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  account          Account   @relation(fields: [accountId], references: [id], onDelete: Cascade)
+  records          Record[]
+
+  @@index([workspaceId, email])
+  @@map("contacts")
+}
+
+model Record {
+  id                String             @id @default(uuid()) @db.Uuid
+  workspaceId       String             @map("workspace_id") @db.Uuid
+  recordTypeId      String             @map("record_type_id") @db.Uuid
+  accountId         String?            @map("account_id") @db.Uuid
+  contactId         String?            @map("contact_id") @db.Uuid
+  title             String
+  code              String?
+  description       String?
+  statusId          String?            @map("status_id") @db.Uuid
+  priority          String             @default("medium")
+  ownerUserId       String?            @map("owner_user_id") @db.Uuid
+  assigneeUserId    String?            @map("assignee_user_id") @db.Uuid
+  openedAt          DateTime?          @map("opened_at") @db.Timestamptz(6)
+  dueAt             DateTime?          @map("due_at") @db.Timestamptz(6)
+  closedAt          DateTime?          @map("closed_at") @db.Timestamptz(6)
+  sourceSystem      String?            @map("source_system")
+  sourceExternalId  String?            @map("source_external_id")
+  sourceUrl         String?            @map("source_url")
+  dataJson          Json               @default("{}") @map("data_jsonb")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recordType        RecordType         @relation(fields: [recordTypeId], references: [id], onDelete: Restrict)
+  account           Account?           @relation(fields: [accountId], references: [id], onDelete: SetNull)
+  contact           Contact?           @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  status            StatusDefinition?  @relation(fields: [statusId], references: [id], onDelete: SetNull)
+  ownerUser         User?              @relation("RecordOwner", fields: [ownerUserId], references: [id], onDelete: SetNull)
+  assigneeUser      User?              @relation("RecordAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  parentRelations   RecordRelation[]   @relation("ParentRecord")
+  childRelations    RecordRelation[]   @relation("ChildRecord")
+  tasks             Task[]
+  notes             Note[]
+  customFieldValues CustomFieldValue[]
+  tagAssignments    TagAssignment[]
+
+  @@index([workspaceId, recordTypeId])
+  @@index([workspaceId, statusId])
+  @@index([workspaceId, assigneeUserId])
+  @@index([workspaceId, dueAt])
+  @@index([workspaceId, createdAt(sort: Desc)])
+  @@index([workspaceId, sourceSystem, sourceExternalId])
+  @@map("records")
+}
+
+model RecordRelation {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  parentRecordId String    @map("parent_record_id") @db.Uuid
+  childRecordId  String    @map("child_record_id") @db.Uuid
+  relationType   String    @map("relation_type")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  parentRecord   Record    @relation("ParentRecord", fields: [parentRecordId], references: [id], onDelete: Cascade)
+  childRecord    Record    @relation("ChildRecord", fields: [childRecordId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, parentRecordId, childRecordId, relationType])
+  @@map("record_relations")
+}
+
+model CustomFieldDefinition {
+  id                String             @id @default(uuid()) @db.Uuid
+  workspaceId       String             @map("workspace_id") @db.Uuid
+  entityType        String             @map("entity_type")
+  recordTypeId      String?            @map("record_type_id") @db.Uuid
+  key               String
+  label             String
+  fieldType         String             @map("field_type")
+  placeholder       String?
+  helpText          String?            @map("help_text")
+  optionsJsonb      Json               @default("[]") @map("options_jsonb")
+  defaultValueJsonb Json?              @map("default_value_jsonb")
+  isRequired        Boolean            @default(false) @map("is_required")
+  isFilterable      Boolean            @default(false) @map("is_filterable")
+  isVisibleInList   Boolean            @default(false) @map("is_visible_in_list")
+  isVisibleInDetail Boolean            @default(true) @map("is_visible_in_detail")
+  sortOrder         Int                @default(0) @map("sort_order")
+  createdAt         DateTime           @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime           @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace          @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  recordType        RecordType?        @relation(fields: [recordTypeId], references: [id], onDelete: Cascade)
+  values            CustomFieldValue[]
+
+  @@map("custom_field_definitions")
+}
+
+model CustomFieldValue {
+  id                String                @id @default(uuid()) @db.Uuid
+  recordId          String                @map("record_id") @db.Uuid
+  record            Record                @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  workspaceId       String                @map("workspace_id") @db.Uuid
+  entityType        String                @map("entity_type")
+  entityId          String                @map("entity_id") @db.Uuid
+  fieldDefinitionId String                @map("field_definition_id") @db.Uuid
+  valueJsonb        Json?                 @map("value_jsonb")
+  createdAt         DateTime              @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime              @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace             @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  fieldDefinition   CustomFieldDefinition @relation(fields: [fieldDefinitionId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, entityType, entityId, fieldDefinitionId])
+  @@index([workspaceId, entityType, entityId])
+  @@map("custom_field_values")
+}
+
+model Task {
+  id                String    @id @default(uuid()) @db.Uuid
+  recordId          String?   @map("record_id") @db.Uuid
+  record            Record?   @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  title             String
+  description       String?
+  status            String    @default("open")
+  priority          String    @default("medium")
+  assigneeUserId    String?   @map("assignee_user_id") @db.Uuid
+  createdByUserId   String?   @map("created_by_user_id") @db.Uuid
+  relatedEntityType String?   @map("related_entity_type")
+  relatedEntityId   String?   @map("related_entity_id") @db.Uuid
+  dueAt             DateTime? @map("due_at") @db.Timestamptz(6)
+  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
+  reminderAt        DateTime? @map("reminder_at") @db.Timestamptz(6)
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeUser      User?     @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  createdByUser     User?     @relation("TaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, assigneeUserId, status])
+  @@index([workspaceId, dueAt])
+  @@map("tasks")
+}
+
+model Note {
+  id           String    @id @default(uuid()) @db.Uuid
+  recordId     String?   @map("record_id") @db.Uuid
+  record       Record?   @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  workspaceId  String    @map("workspace_id") @db.Uuid
+  entityType   String    @map("entity_type")
+  entityId     String    @map("entity_id") @db.Uuid
+  authorUserId String?   @map("author_user_id") @db.Uuid
+  body         String
+  isInternal   Boolean   @default(true) @map("is_internal")
+  createdAt    DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt    DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace    Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  authorUser   User?     @relation("NoteAuthor", fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, entityType, entityId])
+  @@map("notes")
+}
+
+model FileAttachment {
+  id               String    @id @default(uuid()) @db.Uuid
+  workspaceId      String    @map("workspace_id") @db.Uuid
+  entityType       String    @map("entity_type")
+  entityId         String    @map("entity_id") @db.Uuid
+  uploadedByUserId String?   @map("uploaded_by_user_id") @db.Uuid
+  fileName         String    @map("file_name")
+  storageKey       String    @map("storage_key")
+  mimeType         String    @map("mime_type")
+  sizeBytes        BigInt    @map("size_bytes")
+  version          Int       @default(1)
+  createdAt        DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt        DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  uploadedByUser   User?     @relation("FileUploader", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, entityType, entityId])
+  @@map("files")
+}
+
+model ActivityEvent {
+  id             String    @id @default(uuid()) @db.Uuid
+  workspaceId    String    @map("workspace_id") @db.Uuid
+  entityType     String    @map("entity_type")
+  entityId       String    @map("entity_id") @db.Uuid
+  actorUserId    String?   @map("actor_user_id") @db.Uuid
+  eventType      String    @map("event_type")
+  eventLabel     String    @map("event_label")
+  oldValuesJsonb Json?     @map("old_values_jsonb")
+  newValuesJsonb Json?     @map("new_values_jsonb")
+  metaJsonb      Json      @default("{}") @map("meta_jsonb")
+  createdAt      DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace      Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  actorUser      User?     @relation("ActivityActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, entityType, entityId, createdAt(sort: Desc)])
+  @@map("activity_events")
+}
+
+model DashboardConfig {
+  id          String            @id @default(uuid()) @db.Uuid
+  workspaceId String            @map("workspace_id") @db.Uuid
+  name        String
+  scopeType   String            @map("scope_type")
+  scopeId     String?           @map("scope_id") @db.Uuid
+  isDefault   Boolean           @default(false) @map("is_default")
+  createdAt   DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  widgets     DashboardWidget[]
+
+  @@map("dashboard_configs")
+}
+
+model DashboardWidget {
+  id                String          @id @default(uuid()) @db.Uuid
+  workspaceId       String          @map("workspace_id") @db.Uuid
+  dashboardConfigId String          @map("dashboard_config_id") @db.Uuid
+  widgetType        String          @map("widget_type")
+  title             String
+  positionX         Int             @default(0) @map("position_x")
+  positionY         Int             @default(0) @map("position_y")
+  width             Int             @default(4)
+  height            Int             @default(2)
+  settingsJsonb     Json            @default("{}") @map("settings_jsonb")
+  createdAt         DateTime        @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime        @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace       @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  dashboardConfig   DashboardConfig @relation(fields: [dashboardConfigId], references: [id], onDelete: Cascade)
+
+  @@map("dashboard_widgets")
+}
+
+model SavedReport {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  name            String
+  entityType      String    @map("entity_type")
+  reportType      String    @map("report_type")
+  definitionJsonb Json      @default("{}") @map("definition_jsonb")
+  isSystem        Boolean   @default(false) @map("is_system")
+  createdByUserId String?   @map("created_by_user_id") @db.Uuid
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdByUser   User?     @relation("ReportCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@map("saved_reports")
+}
+
+model SavedView {
+  id              String    @id @default(uuid()) @db.Uuid
+  workspaceId     String    @map("workspace_id") @db.Uuid
+  entityType      String    @map("entity_type")
+  name            String
+  isDefault       Boolean   @default(false) @map("is_default")
+  visibility      String    @default("private")
+  createdByUserId String?   @map("created_by_user_id") @db.Uuid
+  filtersJsonb    Json      @default("{}") @map("filters_jsonb")
+  columnsJsonb    Json      @default("[]") @map("columns_jsonb")
+  sortingJsonb    Json      @default("{}") @map("sorting_jsonb")
+  createdAt       DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  createdByUser   User?     @relation("ViewCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+
+  @@map("saved_views")
+}
+
+model NotificationRule {
+  id                String    @id @default(uuid()) @db.Uuid
+  workspaceId       String    @map("workspace_id") @db.Uuid
+  name              String
+  entityType        String    @map("entity_type")
+  triggerType       String    @map("trigger_type")
+  conditionsJsonb   Json      @default("{}") @map("conditions_jsonb")
+  recipientStrategy String    @map("recipient_strategy")
+  channelsJsonb     Json      @default("[\"in_app\"]") @map("channels_jsonb")
+  isActive          Boolean   @default(true) @map("is_active")
+  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@map("notification_rules")
+}
+
+model Notification {
+  id          String    @id @default(uuid()) @db.Uuid
+  workspaceId String    @map("workspace_id") @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  type        String
+  title       String
+  body        String?
+  entityType  String?   @map("entity_type")
+  entityId    String?   @map("entity_id") @db.Uuid
+  isRead      Boolean   @default(false) @map("is_read")
+  readAt      DateTime? @map("read_at") @db.Timestamptz(6)
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, userId, isRead, createdAt(sort: Desc)])
+  @@map("notifications")
+}
+
+model Integration {
+  id              String               @id @default(uuid()) @db.Uuid
+  workspaceId     String               @map("workspace_id") @db.Uuid
+  provider        String
+  integrationType String               @map("integration_type")
+  name            String
+  status          String               @default("inactive")
+  configJsonb     Json                 @default("{}") @map("config_jsonb")
+  lastSyncAt      DateTime?            @map("last_sync_at") @db.Timestamptz(6)
+  createdAt       DateTime             @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt       DateTime             @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace       Workspace            @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  syncJobs        SyncJob[]
+  externalLinks   ExternalEntityLink[]
+
+  @@map("integrations")
+}
+
+model SyncJob {
+  id             String      @id @default(uuid()) @db.Uuid
+  workspaceId    String      @map("workspace_id") @db.Uuid
+  integrationId  String      @map("integration_id") @db.Uuid
+  jobType        String      @map("job_type")
+  direction      String
+  status         String      @default("pending")
+  startedAt      DateTime?   @map("started_at") @db.Timestamptz(6)
+  finishedAt     DateTime?   @map("finished_at") @db.Timestamptz(6)
+  processedCount Int         @default(0) @map("processed_count")
+  failedCount    Int         @default(0) @map("failed_count")
+  errorMessage   String?     @map("error_message")
+  payloadJsonb   Json        @default("{}") @map("payload_jsonb")
+  createdAt      DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt      DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace      Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  integration    Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@index([workspaceId, integrationId, status])
+  @@map("sync_jobs")
+}
+
+model ExternalEntityLink {
+  id                 String      @id @default(uuid()) @db.Uuid
+  workspaceId        String      @map("workspace_id") @db.Uuid
+  integrationId      String      @map("integration_id") @db.Uuid
+  entityType         String      @map("entity_type")
+  entityId           String      @map("entity_id") @db.Uuid
+  externalEntityType String      @map("external_entity_type")
+  externalId         String      @map("external_id")
+  lastSyncedAt       DateTime?   @map("last_synced_at") @db.Timestamptz(6)
+  createdAt          DateTime    @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt          DateTime    @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace          Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  integration        Integration @relation(fields: [integrationId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, integrationId, entityType, entityId, externalEntityType, externalId])
+  @@map("external_entity_links")
+}
+
+model TagAssignment {
+  id          String    @id @default(uuid()) @db.Uuid
+  recordId    String    @map("record_id") @db.Uuid
+  record      Record    @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  workspaceId String    @map("workspace_id") @db.Uuid
+  tagId       String    @map("tag_id") @db.Uuid
+  entityType  String    @map("entity_type")
+  entityId    String    @map("entity_id") @db.Uuid
+  createdAt   DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt   DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  tag         Tag       @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, tagId, entityType, entityId])
+  @@map("tag_assignments")
+}
