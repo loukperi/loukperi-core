@@ -1,7 +1,4 @@
-import {
-  Injectable,
-  UnauthorizedException,
-} from '@nestjs/common';
+import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
 import * as argon2 from 'argon2';
@@ -29,28 +26,22 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    const passwordMatches = await this.verifyPassword(dto.password, user.passwordHash);
+    const passwordMatches = await this.verifyPassword(
+      dto.password,
+      user.passwordHash,
+    );
+
     if (!passwordMatches) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
     const authPayload = this.buildAuthPayload(user);
+
     await this.authRepository.markLastLogin(user.id);
 
     return {
-      access_token: await this.jwtService.signAsync(authPayload),
-      refresh_token: await this.jwtService.signAsync(
-        {
-          sub: user.id,
-          email: user.email,
-          type: 'refresh',
-        },
-        {
-          secret:
-            this.configService.get<string>('auth.refreshSecret') ?? 'change-me-refresh',
-          expiresIn: (this.configService.get<string>('auth.refreshTtl') ?? '30d') as any,
-        },
-      ),
+      access_token: await this.signAccessToken(authPayload),
+      refresh_token: await this.signRefreshToken(user.id, user.email),
       user: {
         id: user.id,
         email: user.email,
@@ -58,7 +49,10 @@ export class AuthService {
         last_name: user.lastName,
       },
       workspaces: authPayload.workspaceIds.map((workspaceId) => {
-        const membership = user.memberships.find((item) => item.workspaceId === workspaceId);
+        const membership = user.memberships.find(
+          (item) => item.workspaceId === workspaceId,
+        );
+
         return {
           id: membership?.workspace.id ?? workspaceId,
           name: membership?.workspace.name ?? 'Workspace',
@@ -70,19 +64,20 @@ export class AuthService {
 
   async refresh(dto: RefreshTokenDto) {
     try {
-      const decoded = await this.jwtService.verifyAsync<{ sub: string; type?: string }>(
-        dto.refresh_token,
-        {
-          secret:
-            this.configService.get<string>('auth.refreshSecret') ?? 'change-me-refresh',
-        },
-      );
+      const decoded = await this.jwtService.verifyAsync<{
+        sub: string;
+        email?: string;
+        type?: string;
+      }>(dto.refresh_token, {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+      });
 
       if (decoded.type !== 'refresh') {
         throw new UnauthorizedException('Invalid refresh token');
       }
 
       const user = await this.authRepository.findUserById(decoded.sub);
+
       if (!user || !user.isActive) {
         throw new UnauthorizedException('Invalid refresh token');
       }
@@ -90,19 +85,8 @@ export class AuthService {
       const authPayload = this.buildAuthPayload(user);
 
       return {
-        access_token: await this.jwtService.signAsync(authPayload),
-        refresh_token: await this.jwtService.signAsync(
-          {
-            sub: user.id,
-            email: user.email,
-            type: 'refresh',
-          },
-          {
-            secret:
-              this.configService.get<string>('auth.refreshSecret') ?? 'change-me-refresh',
-            expiresIn: (this.configService.get<string>('auth.refreshTtl') ?? '30d') as any,
-          },
-        ),
+        access_token: await this.signAccessToken(authPayload),
+        refresh_token: await this.signRefreshToken(user.id, user.email),
       };
     } catch {
       throw new UnauthorizedException('Invalid refresh token');
@@ -119,6 +103,7 @@ export class AuthService {
     }
 
     const currentUser = await this.authRepository.findUserById(user.sub);
+
     if (!currentUser) {
       throw new UnauthorizedException('Unauthorized');
     }
@@ -151,31 +136,55 @@ export class AuthService {
     };
   }
 
+  private async signAccessToken(payload: Record<string, unknown>) {
+    return this.jwtService.signAsync(payload, {
+      secret: this.configService.getOrThrow<string>('JWT_ACCESS_SECRET'),
+      expiresIn: (this.configService.get<string>('JWT_ACCESS_TTL') ?? '12h') as any,
+    });
+  }
+
+  private async signRefreshToken(userId: string, email: string) {
+    return this.jwtService.signAsync(
+      {
+        sub: userId,
+        email,
+        type: 'refresh',
+      },
+      {
+        secret: this.configService.getOrThrow<string>('JWT_REFRESH_SECRET'),
+        expiresIn: (this.configService.get<string>('JWT_REFRESH_TTL') ?? '30d') as any,
+      },
+    );
+  }
+
   private buildAuthPayload(user: AuthUser) {
     if (!user) {
       throw new UnauthorizedException('Unauthorized');
     }
 
     const activeMemberships = user.memberships.filter(
-      (membership) => membership.status === 'active' && membership.workspace.isActive,
+      (membership) =>
+        membership.status === 'active' && membership.workspace.isActive,
     );
 
-    const workspaceIds = activeMemberships.map((membership) => membership.workspaceId);
+    const workspaceIds = activeMemberships.map(
+      (membership) => membership.workspaceId,
+    );
+
     const roleCodes = activeMemberships.flatMap((membership) =>
       membership.roles.map((item) => item.role.code),
     );
 
     const dbPermissions = activeMemberships.flatMap((membership) =>
       membership.roles.flatMap((item) =>
-        item.role.rolePermissions.map((rolePermission) => rolePermission.permission.code),
+        item.role.rolePermissions.map(
+          (rolePermission) => rolePermission.permission.code,
+        ),
       ),
     );
 
     const permissions = Array.from(
-      new Set([
-        ...resolvePermissionsFromRoleCodes(roleCodes),
-        ...dbPermissions,
-      ]),
+      new Set([...resolvePermissionsFromRoleCodes(roleCodes), ...dbPermissions]),
     );
 
     return {
@@ -187,7 +196,10 @@ export class AuthService {
     };
   }
 
-  private async verifyPassword(plainTextPassword: string, passwordHash: string) {
+  private async verifyPassword(
+    plainTextPassword: string,
+    passwordHash: string,
+  ) {
     if (passwordHash.startsWith('$argon2')) {
       return argon2.verify(passwordHash, plainTextPassword);
     }
