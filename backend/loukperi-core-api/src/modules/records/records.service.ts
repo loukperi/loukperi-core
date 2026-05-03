@@ -4,9 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { Prisma } from '@prisma/client';
+import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { RecordRepository } from 'src/database/repositories/record.repository';
+import { ActivityService } from '../activity/activity.service';
 import { AssignRecordDto } from './dto/assign-record.dto';
 import { AssignTagDto } from './dto/assign-tag.dto';
 import { ChangeRecordStatusDto } from './dto/change-record-status.dto';
@@ -16,7 +17,10 @@ import { UpdateRecordDto } from './dto/update-record.dto';
 
 @Injectable()
 export class RecordsService {
-  constructor(private readonly recordRepository: RecordRepository) {}
+  constructor(
+    private readonly recordRepository: RecordRepository,
+    private readonly activityService: ActivityService,
+  ) {}
 
   async list(
     workspaceId: string | undefined,
@@ -26,7 +30,10 @@ export class RecordsService {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
     this.validateDateRange(query.due_after, query.due_before);
 
-    const result = await this.recordRepository.listByWorkspace(resolvedWorkspaceId, query);
+    const result = await this.recordRepository.listByWorkspace(
+      resolvedWorkspaceId,
+      query,
+    );
 
     return {
       items: result.items.map((item) => this.toRecordResponse(item)),
@@ -67,6 +74,23 @@ export class RecordsService {
       dataJson: (dto.data_jsonb ?? {}) as Prisma.InputJsonValue,
     });
 
+    await this.logRecordActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId: created.id,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.created',
+      eventLabel: 'Record created',
+      newValuesJsonb: {
+        title: created.title,
+        priority: created.priority,
+        statusId: created.statusId,
+        assigneeUserId: created.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
+    });
+
     return this.toRecordResponse(created);
   }
 
@@ -76,7 +100,10 @@ export class RecordsService {
     recordId: string,
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const record = await this.recordRepository.findOne(resolvedWorkspaceId, recordId);
+    const record = await this.recordRepository.findOne(
+      resolvedWorkspaceId,
+      recordId,
+    );
 
     if (!record) {
       throw new NotFoundException('Record not found');
@@ -94,7 +121,11 @@ export class RecordsService {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
     this.validateDates(dto.opened_at, dto.due_at, dto.closed_at);
 
-    const existing = await this.recordRepository.findOne(resolvedWorkspaceId, recordId);
+    const existing = await this.recordRepository.findOne(
+      resolvedWorkspaceId,
+      recordId,
+    );
+
     if (!existing) {
       throw new NotFoundException('Record not found');
     }
@@ -119,6 +150,29 @@ export class RecordsService {
       dataJson: dto.data_jsonb as Prisma.InputJsonValue | undefined,
     });
 
+    await this.logRecordActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId: updated.id,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.updated',
+      eventLabel: 'Record updated',
+      oldValuesJsonb: {
+        title: existing.title,
+        priority: existing.priority,
+        statusId: existing.statusId,
+        assigneeUserId: existing.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        title: updated.title,
+        priority: updated.priority,
+        statusId: updated.statusId,
+        assigneeUserId: updated.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
+    });
+
     return this.toRecordResponse(updated);
   }
 
@@ -129,13 +183,36 @@ export class RecordsService {
     dto: ChangeRecordStatusDto,
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const existing = await this.recordRepository.findOne(resolvedWorkspaceId, recordId);
+
+    const existing = await this.recordRepository.findOne(
+      resolvedWorkspaceId,
+      recordId,
+    );
+
     if (!existing) {
       throw new NotFoundException('Record not found');
     }
 
     const updated = await this.recordRepository.update(recordId, {
       statusId: dto.status_id,
+    });
+
+    await this.logRecordActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId: updated.id,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.status_changed',
+      eventLabel: 'Record status changed',
+      oldValuesJsonb: {
+        statusId: existing.statusId,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        statusId: updated.statusId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        note: dto.note ?? null,
+        source: 'api',
+      } as Prisma.InputJsonValue,
     });
 
     return {
@@ -151,13 +228,35 @@ export class RecordsService {
     dto: AssignRecordDto,
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const existing = await this.recordRepository.findOne(resolvedWorkspaceId, recordId);
+
+    const existing = await this.recordRepository.findOne(
+      resolvedWorkspaceId,
+      recordId,
+    );
+
     if (!existing) {
       throw new NotFoundException('Record not found');
     }
 
     const updated = await this.recordRepository.update(recordId, {
       assigneeUserId: dto.assignee_user_id,
+    });
+
+    await this.logRecordActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId: updated.id,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.assigned',
+      eventLabel: 'Record assigned',
+      oldValuesJsonb: {
+        assigneeUserId: existing.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        assigneeUserId: updated.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
     });
 
     return this.toRecordResponse(updated);
@@ -170,6 +269,21 @@ export class RecordsService {
     dto: AssignTagDto,
   ) {
     await this.getOne(workspaceId, currentUser, recordId);
+
+    await this.logRecordActivity({
+      workspaceId: this.resolveWorkspaceId(workspaceId, currentUser),
+      recordId,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.tag_assigned',
+      eventLabel: 'Record tag assigned',
+      newValuesJsonb: {
+        tagId: dto.tag_id,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
+    });
+
     return {
       id: recordId,
       assigned_tag_id: dto.tag_id,
@@ -183,6 +297,21 @@ export class RecordsService {
     tagId: string,
   ) {
     await this.getOne(workspaceId, currentUser, recordId);
+
+    await this.logRecordActivity({
+      workspaceId: this.resolveWorkspaceId(workspaceId, currentUser),
+      recordId,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.tag_removed',
+      eventLabel: 'Record tag removed',
+      oldValuesJsonb: {
+        tagId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
+    });
+
     return {
       id: recordId,
       removed_tag_id: tagId,
@@ -194,6 +323,7 @@ export class RecordsService {
     currentUser: CurrentUserPayload | undefined,
   ) {
     const resolvedWorkspaceId = workspaceId ?? currentUser?.defaultWorkspaceId;
+
     if (!resolvedWorkspaceId) {
       throw new ForbiddenException('Workspace context is required');
     }
@@ -203,6 +333,12 @@ export class RecordsService {
     }
 
     return resolvedWorkspaceId;
+  }
+
+  private resolveActorUserId(currentUser: CurrentUserPayload | undefined) {
+    const user = currentUser as any;
+
+    return user?.id ?? user?.userId ?? user?.sub ?? null;
   }
 
   private validateDateRange(dueAfter?: string, dueBefore?: string) {
@@ -218,6 +354,33 @@ export class RecordsService {
 
     if (dueAt && closedAt && new Date(dueAt) > new Date(closedAt)) {
       throw new BadRequestException('due_at cannot be greater than closed_at');
+    }
+  }
+
+  private async logRecordActivity(params: {
+    workspaceId: string;
+    recordId: string;
+    actorUserId?: string | null;
+    eventType: string;
+    eventLabel: string;
+    oldValuesJsonb?: Prisma.InputJsonValue | null;
+    newValuesJsonb?: Prisma.InputJsonValue | null;
+    metaJsonb?: Prisma.InputJsonValue;
+  }) {
+    try {
+      await this.activityService.logEvent({
+        workspaceId: params.workspaceId,
+        entityType: 'record',
+        entityId: params.recordId,
+        actorUserId: params.actorUserId ?? null,
+        eventType: params.eventType,
+        eventLabel: params.eventLabel,
+        oldValuesJsonb: params.oldValuesJsonb ?? null,
+        newValuesJsonb: params.newValuesJsonb ?? null,
+        metaJsonb: params.metaJsonb ?? {},
+      });
+    } catch (error) {
+      console.warn('Activity logging failed', error);
     }
   }
 
@@ -243,12 +406,40 @@ export class RecordsService {
       singularLabel: string;
       pluralLabel: string;
     } | null;
-    status?: { id: string; key: string; label: string; color: string | null } | null;
-    account?: { id: string; name: string } | null;
-    contact?: { id: string; firstName: string; lastName: string } | null;
-    ownerUser?: { id: string; firstName: string; lastName: string; email: string } | null;
-    assigneeUser?: { id: string; firstName: string; lastName: string; email: string } | null;
-    tagAssignments?: Array<{ tag: { id: string; name: string; color: string | null } }>;
+    status?: {
+      id: string;
+      key: string;
+      label: string;
+      color: string | null;
+    } | null;
+    account?: {
+      id: string;
+      name: string;
+    } | null;
+    contact?: {
+      id: string;
+      firstName: string;
+      lastName: string;
+    } | null;
+    ownerUser?: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+    } | null;
+    assigneeUser?: {
+      id: string;
+      firstName: string;
+      lastName: string;
+      email: string;
+    } | null;
+    tagAssignments?: Array<{
+      tag: {
+        id: string;
+        name: string;
+        color: string | null;
+      };
+    }>;
   }) {
     return {
       id: record.id,

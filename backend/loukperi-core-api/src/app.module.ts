@@ -15,6 +15,7 @@ import { ContactsModule } from './modules/contacts/contacts.module';
 import { ReportsModule } from './modules/reports/reports.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { StatusesModule } from './modules/statuses/statuses.module';
+import { ActivityModule } from './modules/activity/activity.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { StatusesModule } from './modules/statuses/statuses.module';
     ReportsModule,
     NotificationsModule,
 	StatusesModule,
+	ActivityModule,
   ],
 })
 export class AppModule {}

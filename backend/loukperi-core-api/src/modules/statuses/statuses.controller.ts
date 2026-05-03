@@ -4,7 +4,7 @@ import { StatusesService } from './statuses.service';
 
 @ApiTags('Statuses')
 @ApiBearerAuth()
-@Controller('api/v1/statuses')
+@Controller('statuses')
 export class StatusesController {
   constructor(private readonly statusesService: StatusesService) {}
 
