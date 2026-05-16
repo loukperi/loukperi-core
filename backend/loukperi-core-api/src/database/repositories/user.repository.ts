@@ -2,7 +2,10 @@ import { Injectable } from '@nestjs/common';
 import { Prisma, User, WorkspaceUser } from '@prisma/client';
 import { PrismaService } from '../prisma.service';
 
-type UserPatch = Partial<Pick<User, 'firstName' | 'lastName' | 'phone' | 'isActive'>>;
+type UserPatch = Partial<
+  Pick<User, 'firstName' | 'lastName' | 'phone' | 'isActive'>
+>;
+
 type MembershipPatch = Partial<Pick<WorkspaceUser, 'status' | 'jobTitle'>>;
 
 const workspaceUserInclude = {
@@ -71,6 +74,21 @@ export class UserRepository {
     });
   }
 
+  async findRolesByIds(workspaceId: string, roleIds: string[]) {
+    if (!roleIds.length) {
+      return [];
+    }
+
+    return this.prisma.role.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: roleIds,
+        },
+      },
+    });
+  }
+
   async createInWorkspace(params: {
     workspaceId: string;
     email: string;
@@ -117,7 +135,7 @@ export class UserRepository {
         },
       });
 
-      if (params.roleIds?.length) {
+      if (params.roleIds !== undefined) {
         await tx.workspaceUserRole.deleteMany({
           where: {
             workspaceId: params.workspaceId,
@@ -125,14 +143,16 @@ export class UserRepository {
           },
         });
 
-        await tx.workspaceUserRole.createMany({
-          data: params.roleIds.map((roleId) => ({
-            workspaceId: params.workspaceId,
-            workspaceUserId: membership.id,
-            roleId,
-          })),
-          skipDuplicates: true,
-        });
+        if (params.roleIds.length) {
+          await tx.workspaceUserRole.createMany({
+            data: params.roleIds.map((roleId) => ({
+              workspaceId: params.workspaceId,
+              workspaceUserId: membership.id,
+              roleId,
+            })),
+            skipDuplicates: true,
+          });
+        }
       }
 
       return tx.workspaceUser.findUniqueOrThrow({
@@ -147,6 +167,7 @@ export class UserRepository {
     userId: string;
     userData: UserPatch;
     membershipData: MembershipPatch;
+    roleIds?: string[];
   }) {
     return this.prisma.$transaction(async (tx) => {
       await tx.user.update({
@@ -163,6 +184,26 @@ export class UserRepository {
         },
         data: params.membershipData,
       });
+
+      if (params.roleIds !== undefined) {
+        await tx.workspaceUserRole.deleteMany({
+          where: {
+            workspaceId: params.workspaceId,
+            workspaceUserId: membership.id,
+          },
+        });
+
+        if (params.roleIds.length) {
+          await tx.workspaceUserRole.createMany({
+            data: params.roleIds.map((roleId) => ({
+              workspaceId: params.workspaceId,
+              workspaceUserId: membership.id,
+              roleId,
+            })),
+            skipDuplicates: true,
+          });
+        }
+      }
 
       return tx.workspaceUser.findUniqueOrThrow({
         where: { id: membership.id },

@@ -1,4 +1,9 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import * as argon2 from 'argon2';
 import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { UserRepository } from 'src/database/repositories/user.repository';
@@ -16,7 +21,10 @@ export class UsersService {
     query: ListUsersQueryDto,
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const result = await this.userRepository.listByWorkspace(resolvedWorkspaceId, query);
+    const result = await this.userRepository.listByWorkspace(
+      resolvedWorkspaceId,
+      query,
+    );
 
     return {
       items: result.items.map((membership) => this.toUserResponse(membership)),
@@ -36,6 +44,8 @@ export class UsersService {
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
 
+    await this.validateRoleIds(resolvedWorkspaceId, dto.role_ids ?? []);
+
     const membership = await this.userRepository.createInWorkspace({
       workspaceId: resolvedWorkspaceId,
       email: dto.email,
@@ -43,8 +53,8 @@ export class UsersService {
       lastName: dto.last_name,
       phone: dto.phone,
       jobTitle: dto.job_title,
-      passwordHash: await argon2.hash('ChangeMe123!'),
-      roleIds: dto.role_ids,
+      passwordHash: await argon2.hash(dto.password ?? 'ChangeMe123!'),
+      roleIds: dto.role_ids ?? [],
     });
 
     return this.toUserResponse(membership);
@@ -76,6 +86,19 @@ export class UsersService {
   ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
 
+    const existing = await this.userRepository.findMembershipByUserId(
+      resolvedWorkspaceId,
+      userId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException('User not found in workspace');
+    }
+
+    if (dto.role_ids !== undefined) {
+      await this.validateRoleIds(resolvedWorkspaceId, dto.role_ids);
+    }
+
     const updated = await this.userRepository.updateInWorkspace({
       workspaceId: resolvedWorkspaceId,
       userId,
@@ -89,9 +112,88 @@ export class UsersService {
         status: dto.membership_status,
         jobTitle: dto.job_title,
       },
+      roleIds: dto.role_ids,
     });
 
     return this.toUserResponse(updated);
+  }
+
+  async activate(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    userId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+
+    const existing = await this.userRepository.findMembershipByUserId(
+      resolvedWorkspaceId,
+      userId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException('User not found in workspace');
+    }
+
+    const updated = await this.userRepository.updateInWorkspace({
+      workspaceId: resolvedWorkspaceId,
+      userId,
+      userData: {
+        isActive: true,
+      },
+      membershipData: {
+        status: 'active',
+      },
+    });
+
+    return this.toUserResponse(updated);
+  }
+
+  async deactivate(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    userId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+
+    const existing = await this.userRepository.findMembershipByUserId(
+      resolvedWorkspaceId,
+      userId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException('User not found in workspace');
+    }
+
+    if (existing.isOwner) {
+      throw new BadRequestException('Workspace owner cannot be deactivated');
+    }
+
+    const updated = await this.userRepository.updateInWorkspace({
+      workspaceId: resolvedWorkspaceId,
+      userId,
+      userData: {
+        isActive: false,
+      },
+      membershipData: {
+        status: 'inactive',
+      },
+    });
+
+    return this.toUserResponse(updated);
+  }
+
+  private async validateRoleIds(workspaceId: string, roleIds: string[]) {
+    if (!roleIds.length) {
+      return;
+    }
+
+    const roles = await this.userRepository.findRolesByIds(workspaceId, roleIds);
+
+    if (roles.length !== roleIds.length) {
+      throw new BadRequestException(
+        'One or more role_ids do not exist in this workspace',
+      );
+    }
   }
 
   private resolveWorkspaceId(
@@ -143,6 +245,7 @@ export class UsersService {
       email: membership.user.email,
       first_name: membership.user.firstName,
       last_name: membership.user.lastName,
+      full_name: `${membership.user.firstName} ${membership.user.lastName}`,
       phone: membership.user.phone,
       is_active: membership.user.isActive,
       last_login_at: membership.user.lastLoginAt,

@@ -1,6 +1,19 @@
-import { Body, Controller, Get, Param, Patch, Post, Query, UseGuards, UseInterceptors } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Get,
+  Param,
+  Patch,
+  Post,
+  Query,
+  UseGuards,
+  UseInterceptors,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiTags } from '@nestjs/swagger';
-import { CurrentUser, CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
+import {
+  CurrentUser,
+  CurrentUserPayload,
+} from 'src/common/decorators/current-user.decorator';
 import { Permissions } from 'src/common/decorators/permissions.decorator';
 import { WorkspaceId } from 'src/common/decorators/workspace-id.decorator';
 import { JwtAuthGuard } from 'src/common/guards/jwt-auth.guard';
@@ -58,5 +71,25 @@ export class UsersController {
     @Body() dto: UpdateUserDto,
   ) {
     return this.usersService.update(workspaceId, currentUser, userId, dto);
+  }
+
+  @Post(':userId/activate')
+  @Permissions('users.update')
+  activate(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.activate(workspaceId, currentUser, userId);
+  }
+
+  @Post(':userId/deactivate')
+  @Permissions('users.update')
+  deactivate(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('userId') userId: string,
+  ) {
+    return this.usersService.deactivate(workspaceId, currentUser, userId);
   }
 }
