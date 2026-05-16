@@ -4,8 +4,10 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { Prisma } from '@prisma/client';
 import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { TaskRepository } from 'src/database/repositories/task.repository';
+import { ActivityService } from '../activity/activity.service';
 import { CompleteTaskDto } from './dto/complete-task.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { ListTasksQueryDto } from './dto/list-tasks.query.dto';
@@ -13,7 +15,10 @@ import { UpdateTaskDto } from './dto/update-task.dto';
 
 @Injectable()
 export class TasksService {
-  constructor(private readonly taskRepository: TaskRepository) {}
+  constructor(
+    private readonly taskRepository: TaskRepository,
+    private readonly activityService: ActivityService,
+  ) {}
 
   async list(
     workspaceId: string | undefined,
@@ -60,6 +65,24 @@ export class TasksService {
       reminderAt: dto.reminder_at ? new Date(dto.reminder_at) : undefined,
     });
 
+    await this.logTaskActivityForRelatedRecord({
+      workspaceId: resolvedWorkspaceId,
+      task: created,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'task.created',
+      eventLabel: 'Task created',
+      newValuesJsonb: {
+        taskId: created.id,
+        title: created.title,
+        description: created.description,
+        status: created.status,
+        priority: created.priority,
+        assigneeUserId: created.assigneeUserId,
+        dueAt: created.dueAt?.toISOString() ?? null,
+        reminderAt: created.reminderAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+    });
+
     return this.toTaskResponse(created);
   }
 
@@ -102,6 +125,37 @@ export class TasksService {
       reminderAt: dto.reminder_at ? new Date(dto.reminder_at) : undefined,
     });
 
+    const statusChanged =
+      dto.status !== undefined && dto.status !== existing.status;
+
+    await this.logTaskActivityForRelatedRecord({
+      workspaceId: resolvedWorkspaceId,
+      task: updated,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: statusChanged ? 'task.status_changed' : 'task.updated',
+      eventLabel: statusChanged ? 'Task status changed' : 'Task updated',
+      oldValuesJsonb: {
+        taskId: existing.id,
+        title: existing.title,
+        description: existing.description,
+        status: existing.status,
+        priority: existing.priority,
+        assigneeUserId: existing.assigneeUserId,
+        dueAt: existing.dueAt?.toISOString() ?? null,
+        reminderAt: existing.reminderAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        taskId: updated.id,
+        title: updated.title,
+        description: updated.description,
+        status: updated.status,
+        priority: updated.priority,
+        assigneeUserId: updated.assigneeUserId,
+        dueAt: updated.dueAt?.toISOString() ?? null,
+        reminderAt: updated.reminderAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+    });
+
     return this.toTaskResponse(updated);
   }
 
@@ -121,6 +175,25 @@ export class TasksService {
     const updated = await this.taskRepository.update(taskId, {
       status: 'completed',
       completedAt: new Date(),
+    });
+
+    await this.logTaskActivityForRelatedRecord({
+      workspaceId: resolvedWorkspaceId,
+      task: updated,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'task.completed',
+      eventLabel: 'Task completed',
+      oldValuesJsonb: {
+        taskId: existing.id,
+        status: existing.status,
+        completedAt: existing.completedAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        taskId: updated.id,
+        status: updated.status,
+        completedAt: updated.completedAt?.toISOString() ?? null,
+        completionNote: dto.note ?? null,
+      } as Prisma.InputJsonValue,
     });
 
     return {
@@ -146,6 +219,24 @@ export class TasksService {
       completedAt: null,
     });
 
+    await this.logTaskActivityForRelatedRecord({
+      workspaceId: resolvedWorkspaceId,
+      task: reopened,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'task.reopened',
+      eventLabel: 'Task reopened',
+      oldValuesJsonb: {
+        taskId: existing.id,
+        status: existing.status,
+        completedAt: existing.completedAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+      newValuesJsonb: {
+        taskId: reopened.id,
+        status: reopened.status,
+        completedAt: reopened.completedAt?.toISOString() ?? null,
+      } as Prisma.InputJsonValue,
+    });
+
     return this.toTaskResponse(reopened);
   }
 
@@ -165,6 +256,12 @@ export class TasksService {
     return resolvedWorkspaceId;
   }
 
+  private resolveActorUserId(currentUser: CurrentUserPayload | undefined) {
+    const user = currentUser as any;
+
+    return user?.id ?? user?.userId ?? user?.sub ?? null;
+  }
+
   private validateDateRange(dueAfter?: string, dueBefore?: string) {
     if (dueAfter && dueBefore && new Date(dueAfter) > new Date(dueBefore)) {
       throw new BadRequestException('due_after cannot be greater than due_before');
@@ -174,6 +271,60 @@ export class TasksService {
   private validateDates(reminderAt?: string, dueAt?: string) {
     if (reminderAt && dueAt && new Date(reminderAt) > new Date(dueAt)) {
       throw new BadRequestException('reminder_at cannot be greater than due_at');
+    }
+  }
+
+  private isValidUuid(value: string | null | undefined) {
+    if (!value) {
+      return false;
+    }
+
+    const normalizedValue = String(value)
+      .trim()
+      .replace(/[‐-‒–—―]/g, '-');
+
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    return uuidRegex.test(normalizedValue);
+  }
+
+  private async logTaskActivityForRelatedRecord(params: {
+    workspaceId: string;
+    task: {
+      id: string;
+      relatedEntityType: string | null;
+      relatedEntityId: string | null;
+    };
+    actorUserId?: string | null;
+    eventType: string;
+    eventLabel: string;
+    oldValuesJsonb?: Prisma.InputJsonValue | null;
+    newValuesJsonb?: Prisma.InputJsonValue | null;
+    metaJsonb?: Prisma.InputJsonValue;
+  }) {
+    try {
+      if (params.task.relatedEntityType !== 'record') {
+        return;
+      }
+
+      if (!this.isValidUuid(params.task.relatedEntityId)) {
+        return;
+      }
+
+      await this.activityService.logEvent({
+        workspaceId: params.workspaceId,
+        entityType: 'record',
+        entityId: params.task.relatedEntityId as string,
+        actorUserId: params.actorUserId ?? null,
+        eventType: params.eventType,
+        eventLabel: params.eventLabel,
+        oldValuesJsonb: params.oldValuesJsonb ?? null,
+        newValuesJsonb: params.newValuesJsonb ?? null,
+        metaJsonb: params.metaJsonb ?? {},
+      });
+    } catch (error) {
+      console.warn('Task activity logging failed', error);
     }
   }
 
