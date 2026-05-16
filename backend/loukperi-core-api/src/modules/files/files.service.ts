@@ -5,6 +5,9 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
+import { randomUUID } from 'crypto';
+import { mkdir, stat, writeFile } from 'fs/promises';
+import { basename, extname, join } from 'path';
 import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { PrismaService } from 'src/database/prisma.service';
 import { ActivityService } from '../activity/activity.service';
@@ -12,6 +15,8 @@ import { CreateFileAttachmentDto } from './dto/create-file-attachment.dto';
 
 @Injectable()
 export class FilesService {
+  private readonly uploadRoot = join(process.cwd(), 'uploads');
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly activityService: ActivityService,
@@ -104,6 +109,132 @@ export class FilesService {
     return this.toFileResponse(created);
   }
 
+  async uploadToRecord(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    recordId: string,
+    file: Express.Multer.File | undefined,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+    this.validateUuid(recordId, 'recordId');
+
+    if (!file) {
+      throw new BadRequestException('File is required');
+    }
+
+    if (!file.originalname) {
+      throw new BadRequestException('Original file name is required');
+    }
+
+    if (!file.buffer || file.buffer.length === 0) {
+      throw new BadRequestException('Uploaded file is empty');
+    }
+
+    await this.ensureRecordExists(resolvedWorkspaceId, recordId);
+
+    const safeOriginalName = this.sanitizeFileName(file.originalname);
+    const extension = extname(safeOriginalName);
+    const storedFileName = `${randomUUID()}${extension}`;
+
+    const storageDir = join(
+      this.uploadRoot,
+      'workspaces',
+      resolvedWorkspaceId,
+      'records',
+      recordId,
+    );
+
+    await mkdir(storageDir, { recursive: true });
+
+    const absolutePath = join(storageDir, storedFileName);
+
+    await writeFile(absolutePath, file.buffer);
+
+    const storageKey = [
+      'workspaces',
+      resolvedWorkspaceId,
+      'records',
+      recordId,
+      storedFileName,
+    ].join('/');
+
+    const created = await this.prisma.fileAttachment.create({
+      data: {
+        workspaceId: resolvedWorkspaceId,
+        entityType: 'record',
+        entityId: recordId,
+        uploadedByUserId: this.resolveActorUserId(currentUser),
+        fileName: safeOriginalName,
+        storageKey,
+        mimeType: file.mimetype || 'application/octet-stream',
+        sizeBytes: BigInt(file.size),
+        version: 1,
+      },
+      include: {
+        uploadedByUser: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    await this.logFileActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'file.uploaded',
+      eventLabel: 'File uploaded',
+      newValuesJsonb: {
+        fileId: created.id,
+        fileName: created.fileName,
+        storageKey: created.storageKey,
+        mimeType: created.mimeType,
+        sizeBytes: Number(created.sizeBytes),
+        version: created.version,
+      } as Prisma.InputJsonValue,
+    });
+
+    return this.toFileResponse(created);
+  }
+
+  async getDownloadInfo(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    fileId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+    this.validateUuid(fileId, 'fileId');
+
+    const file = await this.prisma.fileAttachment.findFirst({
+      where: {
+        id: fileId,
+        workspaceId: resolvedWorkspaceId,
+      },
+    });
+
+    if (!file) {
+      throw new NotFoundException('File attachment not found');
+    }
+
+    const absolutePath = join(this.uploadRoot, ...file.storageKey.split('/'));
+
+    try {
+      await stat(absolutePath);
+    } catch {
+      throw new NotFoundException('Physical file not found');
+    }
+
+    return {
+      absolutePath,
+      fileName: file.fileName,
+      mimeType: file.mimeType,
+    };
+  }
+
   async remove(
     workspaceId: string | undefined,
     currentUser: CurrentUserPayload | undefined,
@@ -190,12 +321,25 @@ export class FilesService {
   }
 
   private validateUuid(value: string, fieldName: string) {
-    const uuidRegex =
-      /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+    const normalizedValue = String(value ?? '')
+      .trim()
+      .replace(/[‐-‒–—―]/g, '-');
 
-    if (!uuidRegex.test(value)) {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+    if (!uuidRegex.test(normalizedValue)) {
       throw new BadRequestException(`${fieldName} must be a valid UUID`);
     }
+  }
+
+  private sanitizeFileName(fileName: string) {
+    const baseName = basename(fileName);
+
+    return baseName
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '_')
+      .replace(/\s+/g, ' ')
+      .trim();
   }
 
   private async logFileActivity(params: {
