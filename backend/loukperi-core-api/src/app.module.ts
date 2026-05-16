@@ -17,6 +17,7 @@ import { NotificationsModule } from './modules/notifications/notifications.modul
 import { StatusesModule } from './modules/statuses/statuses.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { NotesModule } from './modules/notes/notes.module';
+import { FilesModule } from './modules/files/files.module';
 
 @Module({
   imports: [
@@ -38,6 +39,7 @@ import { NotesModule } from './modules/notes/notes.module';
 	StatusesModule,
 	ActivityModule,
 	NotesModule,
+	FilesModule,
   ],
 })
 export class AppModule {}
