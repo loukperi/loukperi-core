@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
-import { mkdir, stat, writeFile } from 'fs/promises';
-import { basename, extname, join } from 'path';
+import { mkdir, stat, unlink, writeFile } from 'fs/promises';
+import { basename, extname, isAbsolute, join, relative, resolve } from 'path';
 import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { PrismaService } from 'src/database/prisma.service';
 import { ActivityService } from '../activity/activity.service';
@@ -132,7 +132,8 @@ export class FilesService {
 
     await this.ensureRecordExists(resolvedWorkspaceId, recordId);
 
-    const safeOriginalName = this.sanitizeFileName(file.originalname);
+    const normalizedOriginalName = this.normalizeUploadedFileName(file.originalname);
+    const safeOriginalName = this.sanitizeFileName(normalizedOriginalName);
     const extension = extname(safeOriginalName);
     const storedFileName = `${randomUUID()}${extension}`;
 
@@ -220,7 +221,7 @@ export class FilesService {
       throw new NotFoundException('File attachment not found');
     }
 
-    const absolutePath = join(this.uploadRoot, ...file.storageKey.split('/'));
+    const absolutePath = this.resolvePhysicalPath(file.storageKey);
 
     try {
       await stat(absolutePath);
@@ -234,7 +235,6 @@ export class FilesService {
       mimeType: file.mimeType,
     };
   }
-
   async remove(
     workspaceId: string | undefined,
     currentUser: CurrentUserPayload | undefined,
@@ -260,6 +260,10 @@ export class FilesService {
       },
     });
 
+    const physicalFileDeleted = await this.tryDeletePhysicalFile(
+      existing.storageKey,
+    );
+
     await this.logFileActivity({
       workspaceId: resolvedWorkspaceId,
       recordId: existing.entityId,
@@ -269,18 +273,20 @@ export class FilesService {
       oldValuesJsonb: {
         fileId: existing.id,
         fileName: existing.fileName,
+        storageKey: existing.storageKey,
         mimeType: existing.mimeType,
         sizeBytes: Number(existing.sizeBytes),
         version: existing.version,
+        physicalFileDeleted,
       } as Prisma.InputJsonValue,
     });
 
     return {
       id: fileId,
       deleted: true,
+      physical_file_deleted: physicalFileDeleted,
     };
   }
-
   private async ensureRecordExists(workspaceId: string, recordId: string) {
     const record = await this.prisma.record.findFirst({
       where: {
@@ -333,6 +339,24 @@ export class FilesService {
     }
   }
 
+  private normalizeUploadedFileName(fileName: string) {
+    const value = String(fileName ?? '').trim();
+
+    if (!value) {
+      return 'file';
+    }
+
+    const looksMojibake = /(?:Ã|Â|Î|Ï|Ð|Ñ|â)/.test(value);
+    const decodedAsUtf8 = Buffer.from(value, 'latin1').toString('utf8');
+    const decodedLooksValid = decodedAsUtf8 && !decodedAsUtf8.includes('�');
+
+    if (looksMojibake && decodedLooksValid) {
+      return decodedAsUtf8;
+    }
+
+    return value;
+  }
+  
   private sanitizeFileName(fileName: string) {
     const baseName = basename(fileName);
 
@@ -341,6 +365,57 @@ export class FilesService {
       .replace(/\s+/g, ' ')
       .trim();
   }
+
+  private resolvePhysicalPath(storageKey: string) {
+    const normalizedStorageKey = String(storageKey ?? '')
+      .trim()
+      .replace(/\\/g, '/');
+
+    if (!normalizedStorageKey) {
+      throw new BadRequestException('Storage key is required');
+    }
+
+    const absolutePath = resolve(
+      this.uploadRoot,
+      ...normalizedStorageKey.split('/').filter(Boolean),
+    );
+
+    const relativePath = relative(this.uploadRoot, absolutePath);
+
+    if (
+      relativePath === '' ||
+      relativePath.startsWith('..') ||
+      isAbsolute(relativePath)
+    ) {
+      throw new BadRequestException('Invalid storage key');
+    }
+
+    return absolutePath;
+  }
+
+  private async tryDeletePhysicalFile(storageKey: string) {
+    try {
+      const absolutePath = this.resolvePhysicalPath(storageKey);
+      await unlink(absolutePath);
+
+      return true;
+    } catch (error) {
+      const nodeError = error as NodeJS.ErrnoException;
+
+      if (nodeError?.code === 'ENOENT') {
+        return false;
+      }
+
+      if (error instanceof BadRequestException) {
+        return false;
+      }
+
+      console.warn('Physical file delete failed', error);
+
+      return false;
+    }
+  }
+
 
   private async logFileActivity(params: {
     workspaceId: string;

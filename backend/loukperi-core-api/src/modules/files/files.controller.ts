@@ -114,9 +114,13 @@ export class FilesController {
       fileId,
     );
 
-    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'Content-Disposition',
+      this.buildContentDisposition(file.fileName),
+    );
 
-    return res.download(file.absolutePath, file.fileName);
+    return res.sendFile(file.absolutePath);
   }
 
   @Delete('files/:fileId')
@@ -126,5 +130,27 @@ export class FilesController {
     @Param('fileId') fileId: string,
   ) {
     return this.filesService.remove(workspaceId, currentUser, fileId);
+  }
+
+  private buildContentDisposition(fileName: string) {
+    const safeFileName = String(fileName ?? 'download')
+      .replace(/[\r\n]/g, ' ')
+      .trim();
+
+    const fallbackFileName =
+      safeFileName
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/["\\;]/g, '_')
+        .trim() || 'download';
+
+    const encodedFileName = this.encodeRFC5987ValueChars(safeFileName);
+
+    return `attachment; filename="${fallbackFileName}"; filename*=UTF-8''${encodedFileName}`;
+  }
+
+  private encodeRFC5987ValueChars(value: string) {
+    return encodeURIComponent(value).replace(/['()*]/g, (char) =>
+      `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
   }
 }
