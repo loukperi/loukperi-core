@@ -1,21 +1,46 @@
 import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { IsString, Matches, MaxLength, MinLength } from 'class-validator';
+import {
+  ArrayUnique,
+  IsArray,
+  IsOptional,
+  IsString,
+  IsUUID,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class CreateRoleDto {
-  @ApiProperty()
+  @ApiProperty({
+    example: 'support',
+  })
   @IsString()
   @MinLength(2)
   @MaxLength(80)
-  name!: string;
-
-  @ApiProperty({ example: 'client_admin' })
-  @IsString()
-  @Matches(/^[a-z0-9_]+$/)
-  @MaxLength(60)
   code!: string;
 
-  @ApiPropertyOptional()
+  @ApiProperty({
+    example: 'Support',
+  })
   @IsString()
-  @MaxLength(255)
+  @MinLength(2)
+  @MaxLength(120)
+  name!: string;
+
+  @ApiPropertyOptional({
+    example: 'Support user with limited access.',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(500)
   description?: string;
+
+  @ApiPropertyOptional({
+    type: [String],
+    example: [],
+  })
+  @IsOptional()
+  @IsArray()
+  @ArrayUnique()
+  @IsUUID('4', { each: true })
+  permission_ids?: string[];
 }
