@@ -1,4 +1,8 @@
-import { ForbiddenException, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  ForbiddenException,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { CurrentUserPayload } from 'src/common/decorators/current-user.decorator';
 import { ReportRepository } from 'src/database/repositories/report.repository';
@@ -12,17 +16,36 @@ import { UpdateReportDto } from './dto/update-report.dto';
 export class ReportsService {
   constructor(private readonly reportRepository: ReportRepository) {}
 
-  async list(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, query: ListReportsQueryDto) {
+  async list(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    query: ListReportsQueryDto,
+  ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const result = await this.reportRepository.listByWorkspace(resolvedWorkspaceId, query);
+
+    const result = await this.reportRepository.listByWorkspace(
+      resolvedWorkspaceId,
+      query,
+    );
+
     return {
       items: result.items.map((item) => this.toReportResponse(item)),
-      pagination: { page: query.page, page_size: query.page_size, total: result.total, total_pages: Math.ceil(result.total / query.page_size) },
+      pagination: {
+        page: query.page,
+        page_size: query.page_size,
+        total: result.total,
+        total_pages: Math.ceil(result.total / query.page_size),
+      },
     };
   }
 
-  async create(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, dto: CreateReportDto) {
+  async create(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    dto: CreateReportDto,
+  ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+
     const created = await this.reportRepository.create({
       workspaceId: resolvedWorkspaceId,
       name: dto.name,
@@ -30,22 +53,47 @@ export class ReportsService {
       reportType: dto.report_type,
       definitionJsonb: (dto.definition_jsonb ?? {}) as Prisma.InputJsonValue,
       isSystem: dto.is_system ?? false,
-      createdByUserId: currentUser?.sub,
+      createdByUserId: this.resolveActorUserId(currentUser),
     });
+
     return this.toReportResponse(created);
   }
 
-  async getOne(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, reportId: string) {
+  async getOne(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    reportId: string,
+  ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const report = await this.reportRepository.findOne(resolvedWorkspaceId, reportId);
-    if (!report) throw new NotFoundException('Report not found');
+
+    const report = await this.reportRepository.findOne(
+      resolvedWorkspaceId,
+      reportId,
+    );
+
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
     return this.toReportResponse(report);
   }
 
-  async update(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, reportId: string, dto: UpdateReportDto) {
+  async update(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    reportId: string,
+    dto: UpdateReportDto,
+  ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const existing = await this.reportRepository.findOne(resolvedWorkspaceId, reportId);
-    if (!existing) throw new NotFoundException('Report not found');
+
+    const existing = await this.reportRepository.findOne(
+      resolvedWorkspaceId,
+      reportId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException('Report not found');
+    }
 
     const updated = await this.reportRepository.update(reportId, {
       name: dto.name,
@@ -54,24 +102,80 @@ export class ReportsService {
       definitionJsonb: dto.definition_jsonb as Prisma.InputJsonValue | undefined,
       isSystem: dto.is_system,
     });
+
     return this.toReportResponse(updated);
   }
 
-  async run(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, reportId: string, dto: RunReportDto) {
+  async getData(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    reportId: string,
+  ) {
     const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
-    const report = await this.reportRepository.findOne(resolvedWorkspaceId, reportId);
-    if (!report) throw new NotFoundException('Report not found');
-    const result = await this.reportRepository.runReport(resolvedWorkspaceId, report);
+
+    const report = await this.reportRepository.findOne(
+      resolvedWorkspaceId,
+      reportId,
+    );
+
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
+    const result = await this.reportRepository.runReport(
+      resolvedWorkspaceId,
+      report,
+      {},
+    );
+
     return {
       report: this.toReportResponse(report),
-      parameters: dto.parameters ?? {},
-      export_format: dto.export_format ?? 'json',
+      parameters: {},
+      export_format: 'json',
+      generated_at: new Date().toISOString(),
       ...result,
     };
   }
 
-  async export(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined, dto: ExportDataDto) {
+  async run(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    reportId: string,
+    dto: RunReportDto,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+
+    const report = await this.reportRepository.findOne(
+      resolvedWorkspaceId,
+      reportId,
+    );
+
+    if (!report) {
+      throw new NotFoundException('Report not found');
+    }
+
+    const result = await this.reportRepository.runReport(
+      resolvedWorkspaceId,
+      report,
+      dto.parameters ?? {},
+    );
+
+    return {
+      report: this.toReportResponse(report),
+      parameters: dto.parameters ?? {},
+      export_format: dto.export_format ?? 'json',
+      generated_at: new Date().toISOString(),
+      ...result,
+    };
+  }
+
+  async export(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    dto: ExportDataDto,
+  ) {
     this.resolveWorkspaceId(workspaceId, currentUser);
+
     return {
       entity_type: dto.entity_type,
       filters: dto.filters ?? {},
@@ -83,22 +187,45 @@ export class ReportsService {
     };
   }
 
-  private resolveWorkspaceId(workspaceId: string | undefined, currentUser: CurrentUserPayload | undefined) {
+  private resolveWorkspaceId(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+  ) {
     const resolvedWorkspaceId = workspaceId ?? currentUser?.defaultWorkspaceId;
-    if (!resolvedWorkspaceId) throw new ForbiddenException('Workspace context is required');
-    if (!currentUser || !currentUser.workspaceIds.includes(resolvedWorkspaceId)) throw new ForbiddenException('No access to workspace');
+
+    if (!resolvedWorkspaceId) {
+      throw new ForbiddenException('Workspace context is required');
+    }
+
+    if (!currentUser || !currentUser.workspaceIds.includes(resolvedWorkspaceId)) {
+      throw new ForbiddenException('No access to workspace');
+    }
+
     return resolvedWorkspaceId;
+  }
+
+  private resolveActorUserId(currentUser: CurrentUserPayload | undefined) {
+    const user = currentUser as any;
+
+    return user?.id ?? user?.userId ?? user?.sub ?? null;
   }
 
   private toReportResponse(report: any) {
     return {
       id: report.id,
+      workspace_id: report.workspaceId,
       name: report.name,
       entity_type: report.entityType,
       report_type: report.reportType,
       definition_jsonb: report.definitionJsonb ?? {},
       is_system: report.isSystem,
-      created_by_user: report.createdByUser ? { id: report.createdByUser.id, full_name: `${report.createdByUser.firstName} ${report.createdByUser.lastName}`, email: report.createdByUser.email } : null,
+      created_by_user: report.createdByUser
+        ? {
+            id: report.createdByUser.id,
+            full_name: `${report.createdByUser.firstName} ${report.createdByUser.lastName}`,
+            email: report.createdByUser.email,
+          }
+        : null,
       created_at: report.createdAt.toISOString(),
       updated_at: report.updatedAt.toISOString(),
     };
