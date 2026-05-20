@@ -334,6 +334,338 @@ export class DashboardsService {
     };
   }
 
+  async getDashboardData(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    dashboardId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+    this.validateUuid(dashboardId, 'dashboardId');
+
+    const dashboard = await this.prisma.dashboardConfig.findFirst({
+      where: {
+        id: dashboardId,
+        workspaceId: resolvedWorkspaceId,
+      },
+      include: {
+        widgets: {
+          orderBy: [{ positionY: 'asc' }, { positionX: 'asc' }],
+        },
+      },
+    });
+
+    if (!dashboard) {
+      throw new NotFoundException('Dashboard not found');
+    }
+
+    const widgets = await Promise.all(
+      dashboard.widgets.map(async (widget) => ({
+        widget: this.toWidgetResponse(widget),
+        data: await this.buildWidgetData(resolvedWorkspaceId, currentUser, widget),
+      })),
+    );
+
+    return {
+      dashboard: this.toDashboardResponse(dashboard),
+      widgets,
+    };
+  }
+
+  async getWidgetData(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    widgetId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+    this.validateUuid(widgetId, 'widgetId');
+
+    const widget = await this.prisma.dashboardWidget.findFirst({
+      where: {
+        id: widgetId,
+        workspaceId: resolvedWorkspaceId,
+      },
+    });
+
+    if (!widget) {
+      throw new NotFoundException('Dashboard widget not found');
+    }
+
+    return {
+      widget: this.toWidgetResponse(widget),
+      data: await this.buildWidgetData(resolvedWorkspaceId, currentUser, widget),
+    };
+  }
+
+  private async buildWidgetData(
+    workspaceId: string,
+    currentUser: CurrentUserPayload | undefined,
+    widget: {
+      id: string;
+      widgetType: string;
+      settingsJsonb: Prisma.JsonValue;
+    },
+  ) {
+    switch (widget.widgetType) {
+      case 'records_by_status':
+        return this.getRecordsByStatusData(workspaceId);
+
+      case 'records_by_priority':
+        return this.getRecordsByPriorityData(workspaceId);
+
+      case 'tasks_by_status':
+        return this.getTasksByStatusData(workspaceId);
+
+      case 'tasks_overdue':
+        return this.getOverdueTasksData(workspaceId);
+
+      case 'recent_activity':
+        return this.getRecentActivityData(workspaceId);
+
+      case 'unread_notifications':
+        return this.getUnreadNotificationsData(workspaceId, currentUser);
+
+      default:
+        return {
+          message: `Unsupported widget type: ${widget.widgetType}`,
+          items: [],
+        };
+    }
+  }
+
+  private async getRecordsByStatusData(workspaceId: string) {
+    const grouped = await this.prisma.record.groupBy({
+      by: ['statusId'],
+      where: {
+        workspaceId,
+      },
+      _count: {
+        _all: true,
+      },
+      orderBy: {
+        _count: {
+          statusId: 'desc',
+        },
+      },
+    });
+
+    const statusIds = grouped
+      .map((item) => item.statusId)
+      .filter((statusId): statusId is string => Boolean(statusId));
+
+    const statuses = await this.prisma.statusDefinition.findMany({
+      where: {
+        workspaceId,
+        id: {
+          in: statusIds,
+        },
+      },
+      select: {
+        id: true,
+        key: true,
+        label: true,
+        color: true,
+      },
+    });
+
+    const statusMap = new Map(statuses.map((status) => [status.id, status]));
+
+    return grouped.map((item) => {
+      const status = item.statusId ? statusMap.get(item.statusId) : null;
+
+      return {
+        status_id: item.statusId,
+        status_key: status?.key ?? null,
+        status_label: status?.label ?? 'Unknown',
+        color: status?.color ?? null,
+        count: item._count._all,
+      };
+    });
+  }
+
+  private async getRecordsByPriorityData(workspaceId: string) {
+    const grouped = await this.prisma.record.groupBy({
+      by: ['priority'],
+      where: {
+        workspaceId,
+      },
+      _count: {
+        _all: true,
+      },
+      orderBy: {
+        _count: {
+          priority: 'desc',
+        },
+      },
+    });
+
+    return grouped.map((item) => ({
+      priority: item.priority,
+      count: item._count._all,
+    }));
+  }
+
+  private async getTasksByStatusData(workspaceId: string) {
+    const grouped = await this.prisma.task.groupBy({
+      by: ['status'],
+      where: {
+        workspaceId,
+      },
+      _count: {
+        _all: true,
+      },
+      orderBy: {
+        _count: {
+          status: 'desc',
+        },
+      },
+    });
+
+    return grouped.map((item) => ({
+      status: item.status,
+      count: item._count._all,
+    }));
+  }
+
+  private async getOverdueTasksData(workspaceId: string) {
+    const now = new Date();
+
+    const tasks = await this.prisma.task.findMany({
+      where: {
+        workspaceId,
+        dueAt: {
+          lt: now,
+        },
+        completedAt: null,
+        status: {
+          notIn: ['completed', 'done', 'cancelled'],
+        },
+      },
+      orderBy: {
+        dueAt: 'asc',
+      },
+      take: 10,
+      select: {
+        id: true,
+        title: true,
+        status: true,
+        priority: true,
+        dueAt: true,
+        assigneeUserId: true,
+        relatedEntityType: true,
+        relatedEntityId: true,
+      },
+    });
+
+    return {
+      count: tasks.length,
+      items: tasks.map((task) => ({
+        id: task.id,
+        title: task.title,
+        status: task.status,
+        priority: task.priority,
+        due_at: task.dueAt,
+        assignee_user_id: task.assigneeUserId,
+        related_entity_type: task.relatedEntityType,
+        related_entity_id: task.relatedEntityId,
+      })),
+    };
+  }
+
+  private async getRecentActivityData(workspaceId: string) {
+    const events = await this.prisma.activityEvent.findMany({
+      where: {
+        workspaceId,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+      take: 10,
+      include: {
+        actorUser: {
+          select: {
+            id: true,
+            email: true,
+            firstName: true,
+            lastName: true,
+          },
+        },
+      },
+    });
+
+    return events.map((event) => ({
+      id: event.id,
+      entity_type: event.entityType,
+      entity_id: event.entityId,
+      event_type: event.eventType,
+      event_label: event.eventLabel,
+      actor_user_id: event.actorUserId,
+      actor_user: event.actorUser
+        ? {
+            id: event.actorUser.id,
+            email: event.actorUser.email,
+            full_name: `${event.actorUser.firstName} ${event.actorUser.lastName}`,
+          }
+        : null,
+      old_values_jsonb: event.oldValuesJsonb,
+      new_values_jsonb: event.newValuesJsonb,
+      meta_jsonb: event.metaJsonb,
+      created_at: event.createdAt,
+    }));
+  }
+
+  private async getUnreadNotificationsData(
+    workspaceId: string,
+    currentUser: CurrentUserPayload | undefined,
+  ) {
+    const userId = this.resolveActorUserId(currentUser);
+
+    const [count, items] = await Promise.all([
+      this.prisma.notification.count({
+        where: {
+          workspaceId,
+          userId,
+          isRead: false,
+        },
+      }),
+      this.prisma.notification.findMany({
+        where: {
+          workspaceId,
+          userId,
+          isRead: false,
+        },
+        orderBy: {
+          createdAt: 'desc',
+        },
+        take: 10,
+      }),
+    ]);
+
+    return {
+      count,
+      items: items.map((notification) => ({
+        id: notification.id,
+        type: notification.type,
+        title: notification.title,
+        body: notification.body,
+        entity_type: notification.entityType,
+        entity_id: notification.entityId,
+        is_read: notification.isRead,
+        created_at: notification.createdAt,
+      })),
+    };
+  }
+
+  private resolveActorUserId(currentUser: CurrentUserPayload | undefined) {
+    const user = currentUser as any;
+    const userId = user?.id ?? user?.userId ?? user?.sub;
+
+    if (!userId) {
+      throw new ForbiddenException('User context is required');
+    }
+
+    return userId;
+  }
+
   private async ensureDashboardExists(workspaceId: string, dashboardId: string) {
     const dashboard = await this.prisma.dashboardConfig.findFirst({
       where: {

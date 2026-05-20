@@ -60,6 +60,32 @@ export class DashboardsController {
     return this.dashboardsService.create(workspaceId, currentUser, dto);
   }
 
+  @Get('dashboards/:dashboardId/data')
+  getDashboardData(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('dashboardId') dashboardId: string,
+  ) {
+    return this.dashboardsService.getDashboardData(
+      workspaceId,
+      currentUser,
+      dashboardId,
+    );
+  }
+
+  @Get('dashboard-widgets/:widgetId/data')
+  getWidgetData(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('widgetId') widgetId: string,
+  ) {
+    return this.dashboardsService.getWidgetData(
+      workspaceId,
+      currentUser,
+      widgetId,
+    );
+  }
+
   @Get('dashboards/:dashboardId')
   getOne(
     @WorkspaceId() workspaceId: string | undefined,
