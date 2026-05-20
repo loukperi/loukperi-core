@@ -3,12 +3,12 @@ import { IsIn, IsObject, IsOptional } from 'class-validator';
 
 export class ExportReportDto {
   @ApiPropertyOptional({
-    enum: ['json', 'csv'],
+    enum: ['json', 'csv', 'xlsx'],
     default: 'csv',
   })
   @IsOptional()
-  @IsIn(['json', 'csv'])
-  format?: 'json' | 'csv';
+  @IsIn(['json', 'csv', 'xlsx'])
+  format?: 'json' | 'csv' | 'xlsx';
 
   @ApiPropertyOptional({
     example: {

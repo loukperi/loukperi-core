@@ -16,6 +16,7 @@ import { randomUUID } from 'crypto';
 import { mkdir, readdir, stat, writeFile } from 'fs/promises';
 import { isAbsolute, join, relative, resolve } from 'path';
 import { ExportReportDto } from './dto/export-report.dto';
+import * as ExcelJS from 'exceljs';
 
 @Injectable()
 export class ReportsService {
@@ -225,12 +226,16 @@ export class ReportsService {
     const fileName = this.buildExportFileName(report.name, exportId, format);
     const absolutePath = join(this.exportRoot, fileName);
 
-    const content =
-      format === 'json'
-        ? this.toJsonExportContent(report, parameters, result)
-        : this.toCsvExportContent(result);
+	if (format === 'xlsx') {
+	  await this.writeXlsxExportFile(absolutePath, report, parameters, result);
+	} else {
+	  const content =
+		format === 'json'
+		  ? this.toJsonExportContent(report, parameters, result)
+		  : this.toCsvExportContent(result);
 
-    await writeFile(absolutePath, content, 'utf8');
+	  await writeFile(absolutePath, content, 'utf8');
+	}
 
     return {
       export_id: exportId,
@@ -269,9 +274,7 @@ export class ReportsService {
     return {
       absolutePath,
       fileName,
-      mimeType: fileName.endsWith('.json')
-        ? 'application/json; charset=utf-8'
-        : 'text/csv; charset=utf-8',
+      mimeType: this.getExportMimeType(fileName),
     };
   }
 
@@ -359,10 +362,171 @@ export class ReportsService {
     return `"${escaped}"`;
   }
 
+  private async writeXlsxExportFile(
+    absolutePath: string,
+    report: {
+      id: string;
+      name: string;
+      entityType: string;
+      reportType: string;
+    },
+    parameters: Record<string, unknown>,
+    result: any,
+  ) {
+    const workbook = new ExcelJS.Workbook();
+
+    workbook.creator = 'LoukPeri Core';
+    workbook.created = new Date();
+    workbook.modified = new Date();
+
+    const dataSheet = workbook.addWorksheet('Data');
+    const rows: Array<Record<string, unknown>> = Array.isArray(result?.rows)
+      ? result.rows
+      : [];
+
+    const columns: string[] =
+      Array.isArray(result?.columns) && result.columns.length
+        ? result.columns.map((column: unknown) => String(column))
+        : Array.from(
+            rows.reduce((set: Set<string>, row: Record<string, unknown>) => {
+              Object.keys(row ?? {}).forEach((key) => set.add(key));
+              return set;
+            }, new Set<string>()),
+          );
+
+    if (!columns.length) {
+      dataSheet.columns = [{ header: 'message', key: 'message', width: 30 }];
+      dataSheet.addRow({ message: 'No rows returned' });
+    } else {
+      dataSheet.columns = columns.map((column) => ({
+        header: column,
+        key: column,
+        width: this.getExcelColumnWidth(column),
+      }));
+
+      rows.forEach((row) => {
+        const normalizedRow: Record<string, unknown> = {};
+
+        columns.forEach((column) => {
+          normalizedRow[column] = this.normalizeExcelCellValue(row?.[column]);
+        });
+
+        dataSheet.addRow(normalizedRow);
+      });
+    }
+
+    this.formatWorksheet(dataSheet);
+
+    const summarySheet = workbook.addWorksheet('Summary');
+
+    summarySheet.columns = [
+      { header: 'Field', key: 'field', width: 30 },
+      { header: 'Value', key: 'value', width: 80 },
+    ];
+
+    summarySheet.addRows([
+      { field: 'Report ID', value: report.id },
+      { field: 'Report Name', value: report.name },
+      { field: 'Entity Type', value: report.entityType },
+      { field: 'Report Type', value: report.reportType },
+      { field: 'Generated At', value: new Date().toISOString() },
+      { field: 'Parameters', value: JSON.stringify(parameters ?? {}) },
+      { field: 'Totals', value: JSON.stringify(result?.totals ?? {}) },
+      { field: 'Row Count', value: rows.length },
+    ]);
+
+    this.formatWorksheet(summarySheet);
+
+    await workbook.xlsx.writeFile(absolutePath);
+  }
+
+  private normalizeExcelCellValue(value: unknown) {
+    if (value === null || value === undefined) {
+      return '';
+    }
+
+    if (value instanceof Date) {
+      return value.toISOString();
+    }
+
+    if (typeof value === 'object') {
+      return JSON.stringify(value);
+    }
+
+    return value;
+  }
+
+  private getExcelColumnWidth(column: string) {
+    const normalizedColumn = String(column ?? '');
+
+    if (normalizedColumn.includes('id')) {
+      return 38;
+    }
+
+    if (normalizedColumn.includes('title') || normalizedColumn.includes('name')) {
+      return 35;
+    }
+
+    if (normalizedColumn.includes('date') || normalizedColumn.includes('_at')) {
+      return 26;
+    }
+
+    return Math.max(14, Math.min(normalizedColumn.length + 8, 40));
+  }
+
+  private formatWorksheet(worksheet: ExcelJS.Worksheet) {
+    worksheet.getRow(1).font = {
+      bold: true,
+    };
+
+    worksheet.getRow(1).alignment = {
+      vertical: 'middle',
+    };
+
+    worksheet.views = [
+      {
+        state: 'frozen',
+        ySplit: 1,
+      },
+    ];
+
+    worksheet.eachRow((row) => {
+      row.eachCell((cell) => {
+        cell.alignment = {
+          vertical: 'top',
+          wrapText: true,
+        };
+      });
+    });
+
+    worksheet.autoFilter = {
+      from: {
+        row: 1,
+        column: 1,
+      },
+      to: {
+        row: 1,
+        column: worksheet.columnCount || 1,
+      },
+    };
+  }
+
+  private getExportMimeType(fileName: string) {
+    if (fileName.endsWith('.json')) {
+      return 'application/json; charset=utf-8';
+    }
+
+    if (fileName.endsWith('.xlsx')) {
+      return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    }
+
+    return 'text/csv; charset=utf-8';
+  }
+
   private buildExportFileName(
     reportName: string,
     exportId: string,
-    format: 'json' | 'csv',
+    format: 'json' | 'csv' | 'xlsx',
   ) {
     const safeReportName =
       String(reportName ?? 'report')
