@@ -1,36 +1,79 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsHexColor, IsOptional, IsString, IsUrl, MaxLength, MinLength } from 'class-validator';
+import {
+  IsBoolean,
+  IsOptional,
+  IsString,
+  IsUrl,
+  Matches,
+  MaxLength,
+  MinLength,
+} from 'class-validator';
 
 export class UpdateWorkspaceDto {
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'Demo Client',
+  })
   @IsOptional()
   @IsString()
   @MinLength(2)
   @MaxLength(120)
   name?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'Demo Client SA',
+  })
   @IsOptional()
   @IsString()
-  @MaxLength(180)
+  @MaxLength(160)
   company_name?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: 'Europe/Athens',
+  })
   @IsOptional()
-  @IsUrl()
+  @IsString()
+  @MaxLength(80)
+  timezone?: string;
+
+  @ApiPropertyOptional({
+    example: 'el-GR',
+  })
+  @IsOptional()
+  @IsString()
+  @MaxLength(20)
+  locale?: string;
+
+  @ApiPropertyOptional({
+    example: 'https://example.com/logo.png',
+  })
+  @IsOptional()
+  @IsUrl({ require_tld: false })
+  @MaxLength(500)
   logo_url?: string;
 
-  @ApiPropertyOptional({ example: '#0B1F3A' })
+  @ApiPropertyOptional({
+    example: '#0B1F3A',
+  })
   @IsOptional()
-  @IsHexColor()
+  @IsString()
+  @Matches(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, {
+    message: 'primary_color must be a valid hex color',
+  })
   primary_color?: string;
 
-  @ApiPropertyOptional({ example: '#3A8DFF' })
+  @ApiPropertyOptional({
+    example: '#3A8DFF',
+  })
   @IsOptional()
-  @IsHexColor()
+  @IsString()
+  @Matches(/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/, {
+    message: 'secondary_color must be a valid hex color',
+  })
   secondary_color?: string;
 
-  @ApiPropertyOptional()
+  @ApiPropertyOptional({
+    example: true,
+  })
   @IsOptional()
   @IsBoolean()
   is_active?: boolean;
