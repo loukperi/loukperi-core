@@ -11,6 +11,10 @@ dist/
 build/
 .next/
 
+# local generated files - ΠΟΤΕ στο GitHub
+backend/loukperi-core-api/uploads/
+backend/loukperi-core-api/exports/
+
 # logs
 *.log
 npm-debug.log*
