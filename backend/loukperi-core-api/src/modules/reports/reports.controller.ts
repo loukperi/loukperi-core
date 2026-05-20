@@ -6,6 +6,7 @@ import {
   Patch,
   Post,
   Query,
+  Res,
   UseGuards,
   UseInterceptors,
 } from '@nestjs/common';
@@ -25,6 +26,8 @@ import { ListReportsQueryDto } from './dto/list-reports.query.dto';
 import { RunReportDto } from './dto/run-report.dto';
 import { UpdateReportDto } from './dto/update-report.dto';
 import { ReportsService } from './reports.service';
+import { Response } from 'express';
+import { ExportReportDto } from './dto/export-report.dto';
 
 @ApiTags('Reports')
 @ApiBearerAuth()
@@ -52,6 +55,22 @@ export class ReportsController {
     @Body() dto: CreateReportDto,
   ) {
     return this.reportsService.create(workspaceId, currentUser, dto);
+  }
+
+  @Post('reports/:reportId/export')
+  @Permissions('reports.export')
+  exportReport(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('reportId') reportId: string,
+    @Body() dto: ExportReportDto,
+  ) {
+    return this.reportsService.exportReport(
+      workspaceId,
+      currentUser,
+      reportId,
+      dto,
+    );
   }
 
   @Get('reports/:reportId/data')
@@ -104,5 +123,41 @@ export class ReportsController {
     @Body() dto: ExportDataDto,
   ) {
     return this.reportsService.export(workspaceId, currentUser, dto);
+  }
+  
+  @Get('exports/:exportId/download')
+  @Permissions('reports.export')
+  async downloadExport(
+    @Param('exportId') exportId: string,
+    @Res() res: Response,
+  ) {
+    const file = await this.reportsService.getExportDownloadInfo(exportId);
+
+    res.setHeader('Content-Type', file.mimeType);
+    res.setHeader(
+      'Content-Disposition',
+      this.buildContentDisposition(file.fileName),
+    );
+
+    return res.sendFile(file.absolutePath);
+  }
+
+  private buildContentDisposition(fileName: string) {
+    const safeFileName = String(fileName ?? 'download')
+      .replace(/[\r\n]/g, ' ')
+      .trim();
+
+    const fallbackFileName =
+      safeFileName
+        .replace(/[^\x20-\x7E]/g, '_')
+        .replace(/["\\;]/g, '_')
+        .trim() || 'download';
+
+    const encodedFileName = encodeURIComponent(safeFileName).replace(
+      /['()*]/g,
+      (char) => `%${char.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
+
+    return `attachment; filename="${fallbackFileName}"; filename*=UTF-8''${encodedFileName}`;
   }
 }
