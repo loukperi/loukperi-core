@@ -18,6 +18,7 @@ import { StatusesModule } from './modules/statuses/statuses.module';
 import { ActivityModule } from './modules/activity/activity.module';
 import { NotesModule } from './modules/notes/notes.module';
 import { FilesModule } from './modules/files/files.module';
+import { SavedViewsModule } from './modules/saved-views/saved-views.module';
 
 @Module({
   imports: [
@@ -40,6 +41,7 @@ import { FilesModule } from './modules/files/files.module';
 	ActivityModule,
 	NotesModule,
 	FilesModule,
+	SavedViewsModule,
   ],
 })
 export class AppModule {}
