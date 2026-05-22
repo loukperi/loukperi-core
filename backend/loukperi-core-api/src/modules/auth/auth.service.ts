@@ -110,14 +110,70 @@ export class AuthService {
 
     const authPayload = this.buildAuthPayload(currentUser);
 
+    const currentMembership =
+      currentUser.memberships.find(
+        (membership) =>
+          membership.workspaceId === authPayload.defaultWorkspaceId,
+      ) ??
+      currentUser.memberships.find(
+        (membership) =>
+          membership.status === 'active' && membership.workspace.isActive,
+      ) ??
+      null;
+
+    const currentWorkspaceRoleCodes =
+      currentMembership?.roles.map((item) => item.role.code) ?? [];
+
+    const currentWorkspaceDbPermissions =
+      currentMembership?.roles.flatMap((item) =>
+        item.role.rolePermissions.map(
+          (rolePermission) => rolePermission.permission.code,
+        ),
+      ) ?? [];
+
+    const currentWorkspacePermissions = Array.from(
+      new Set([
+        ...resolvePermissionsFromRoleCodes(currentWorkspaceRoleCodes),
+        ...currentWorkspaceDbPermissions,
+      ]),
+    );
+
     return {
       user: {
         id: currentUser.id,
         email: currentUser.email,
         first_name: currentUser.firstName,
         last_name: currentUser.lastName,
+        full_name: `${currentUser.firstName} ${currentUser.lastName}`,
         is_active: currentUser.isActive,
       },
+      current_workspace: currentMembership
+        ? {
+            id: currentMembership.workspace.id,
+            name: currentMembership.workspace.name,
+            slug: currentMembership.workspace.slug,
+            company_name: currentMembership.workspace.companyName,
+            timezone: currentMembership.workspace.timezone,
+            locale: currentMembership.workspace.locale,
+            logo_url: currentMembership.workspace.logoUrl,
+            primary_color: currentMembership.workspace.primaryColor,
+            secondary_color: currentMembership.workspace.secondaryColor,
+            is_active: currentMembership.workspace.isActive,
+            membership: {
+              id: currentMembership.id,
+              status: currentMembership.status,
+              job_title: currentMembership.jobTitle,
+              avatar_url: currentMembership.avatarUrl,
+              is_owner: currentMembership.isOwner,
+            },
+            roles: currentMembership.roles.map((item) => ({
+              id: item.role.id,
+              code: item.role.code,
+              name: item.role.name,
+            })),
+            permissions: currentWorkspacePermissions,
+          }
+        : null,
       memberships: currentUser.memberships.map((membership) => ({
         id: membership.id,
         workspace_id: membership.workspaceId,
