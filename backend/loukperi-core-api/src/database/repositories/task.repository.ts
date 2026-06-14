@@ -25,6 +25,7 @@ export class TaskRepository {
   async listByWorkspace(workspaceId: string, query: ListTasksQuery) {
     const where: Prisma.TaskWhereInput = {
       workspaceId,
+      archivedAt: null,
       ...(query.scope === 'my' && query.actorUserId
         ? { assigneeUserId: query.actorUserId }
         : {}),
@@ -62,6 +63,12 @@ export class TaskRepository {
 
   findOne(workspaceId: string, taskId: string) {
     return this.prisma.task.findFirst({
+      where: { workspaceId, id: taskId, archivedAt: null },
+    });
+  }
+
+  findOneIncludingArchived(workspaceId: string, taskId: string) {
+    return this.prisma.task.findFirst({
       where: { workspaceId, id: taskId },
     });
   }
@@ -70,6 +77,38 @@ export class TaskRepository {
     return this.prisma.task.update({
       where: { id: taskId },
       data,
+    });
+  }
+  
+  archive(taskId: string, archivedByUserId: string | null, archivedAt = new Date()) {
+    return this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        archivedAt,
+        archivedByUserId,
+      },
+    });
+  }
+
+  restore(taskId: string) {
+    return this.prisma.task.update({
+      where: { id: taskId },
+      data: {
+        archivedAt: null,
+        archivedByUserId: null,
+      },
+    });
+  }
+
+  /**
+   * Hard delete is intentionally kept only for future admin maintenance flows.
+   * Normal user delete must call archive() through TasksService.remove().
+   */
+  delete(taskId: string) {
+    return this.prisma.task.delete({
+      where: {
+        id: taskId,
+      },
     });
   }
 }

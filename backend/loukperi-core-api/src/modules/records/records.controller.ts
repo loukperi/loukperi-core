@@ -96,6 +96,16 @@ export class RecordsController {
     return this.recordsService.assignTag(workspaceId, currentUser, recordId, dto);
   }
 
+  @Delete(':recordId')
+  @Permissions('records.update')
+  remove(
+    @WorkspaceId() workspaceId: string | undefined,
+    @CurrentUser() currentUser: CurrentUserPayload | undefined,
+    @Param('recordId') recordId: string,
+  ) {
+    return this.recordsService.remove(workspaceId, currentUser, recordId);
+  }
+
   @Delete(':recordId/tags/:tagId')
   @Permissions('records.update')
   removeTag(

@@ -21,6 +21,7 @@ import { FilesModule } from './modules/files/files.module';
 import { SavedViewsModule } from './modules/saved-views/saved-views.module';
 import { DashboardsModule } from './modules/dashboards/dashboards.module';
 import { HealthModule } from './modules/health/health.module';
+import { RbacModule } from './common/rbac/rbac.module';
 
 @Module({
   imports: [
@@ -46,6 +47,7 @@ import { HealthModule } from './modules/health/health.module';
 	SavedViewsModule,
 	DashboardsModule,
 	HealthModule,
+	RbacModule,
   ],
 })
 export class AppModule {}

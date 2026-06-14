@@ -48,6 +48,9 @@ model Workspace {
   syncJobs               SyncJob[]
   externalEntityLinks    ExternalEntityLink[]
   tagAssignments         TagAssignment[]
+  taskComments           TaskComment[]
+  taskFiles              TaskFile[]
+  taskActivityLogs       TaskActivityLog[]
 
   @@map("workspaces")
 }
@@ -69,28 +72,32 @@ model WorkspaceSettings {
 }
 
 model User {
-  id                    String           @id @default(uuid()) @db.Uuid
-  email                 String           @unique @db.Citext
-  passwordHash          String           @map("password_hash")
-  firstName             String           @map("first_name")
-  lastName              String           @map("last_name")
+  id                    String            @id @default(uuid()) @db.Uuid
+  email                 String            @unique @db.Citext
+  passwordHash          String            @map("password_hash")
+  firstName             String            @map("first_name")
+  lastName              String            @map("last_name")
   phone                 String?
-  isActive              Boolean          @default(true) @map("is_active")
-  lastLoginAt           DateTime?        @map("last_login_at") @db.Timestamptz(6)
+  isActive              Boolean           @default(true) @map("is_active")
+  lastLoginAt           DateTime?         @map("last_login_at") @db.Timestamptz(6)
   memberships           WorkspaceUser[]
-  ownedAccounts         Account[]        @relation("AccountOwner")
-  ownedRecords          Record[]         @relation("RecordOwner")
-  assignedRecords       Record[]         @relation("RecordAssignee")
-  assignedTasks         Task[]           @relation("TaskAssignee")
-  createdTasks          Task[]           @relation("TaskCreator")
-  notesAuthored         Note[]           @relation("NoteAuthor")
-  filesUploaded         FileAttachment[] @relation("FileUploader")
-  activityAsActor       ActivityEvent[]  @relation("ActivityActor")
-  createdReports        SavedReport[]    @relation("ReportCreator")
-  createdViews          SavedView[]      @relation("ViewCreator")
+  ownedAccounts         Account[]         @relation("AccountOwner")
+  ownedRecords          Record[]          @relation("RecordOwner")
+  assignedRecords       Record[]          @relation("RecordAssignee")
+  assignedTasks         Task[]            @relation("TaskAssignee")
+  createdTasks          Task[]            @relation("TaskCreator")
+  archivedTasks         Task[]            @relation("TaskArchiver")
+  notesAuthored         Note[]            @relation("NoteAuthor")
+  filesUploaded         FileAttachment[]  @relation("FileUploader")
+  activityAsActor       ActivityEvent[]   @relation("ActivityActor")
+  createdReports        SavedReport[]     @relation("ReportCreator")
+  createdViews          SavedView[]       @relation("ViewCreator")
   receivedNotifications Notification[]
-  createdAt             DateTime         @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt             DateTime         @updatedAt @map("updated_at") @db.Timestamptz(6)
+  createdAt             DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt             DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  comments              TaskComment[]
+  files                 TaskFile[]
+  activityLogs          TaskActivityLog[]
 
   @@map("users")
 }
@@ -296,6 +303,7 @@ model Record {
   code              String?
   description       String?
   statusId          String?            @map("status_id") @db.Uuid
+  archived          Boolean            @default(false)
   priority          String             @default("medium")
   ownerUserId       String?            @map("owner_user_id") @db.Uuid
   assigneeUserId    String?            @map("assignee_user_id") @db.Uuid
@@ -393,28 +401,35 @@ model CustomFieldValue {
 }
 
 model Task {
-  id                String    @id @default(uuid()) @db.Uuid
-  recordId          String?   @map("record_id") @db.Uuid
-  record            Record?   @relation(fields: [recordId], references: [id], onDelete: SetNull)
-  workspaceId       String    @map("workspace_id") @db.Uuid
+  id                String            @id @default(uuid()) @db.Uuid
+  recordId          String?           @map("record_id") @db.Uuid
+  record            Record?           @relation(fields: [recordId], references: [id], onDelete: SetNull)
+  workspaceId       String            @map("workspace_id") @db.Uuid
   title             String
   description       String?
-  status            String    @default("open")
-  priority          String    @default("medium")
-  assigneeUserId    String?   @map("assignee_user_id") @db.Uuid
-  createdByUserId   String?   @map("created_by_user_id") @db.Uuid
-  relatedEntityType String?   @map("related_entity_type")
-  relatedEntityId   String?   @map("related_entity_id") @db.Uuid
-  dueAt             DateTime? @map("due_at") @db.Timestamptz(6)
-  completedAt       DateTime? @map("completed_at") @db.Timestamptz(6)
-  reminderAt        DateTime? @map("reminder_at") @db.Timestamptz(6)
-  createdAt         DateTime  @default(now()) @map("created_at") @db.Timestamptz(6)
-  updatedAt         DateTime  @updatedAt @map("updated_at") @db.Timestamptz(6)
-  workspace         Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
-  assigneeUser      User?     @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
-  createdByUser     User?     @relation("TaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  status            String            @default("open")
+  priority          String            @default("medium")
+  assigneeUserId    String?           @map("assignee_user_id") @db.Uuid
+  createdByUserId   String?           @map("created_by_user_id") @db.Uuid
+  relatedEntityType String?           @map("related_entity_type")
+  relatedEntityId   String?           @map("related_entity_id") @db.Uuid
+  dueAt             DateTime?         @map("due_at") @db.Timestamptz(6)
+  completedAt       DateTime?         @map("completed_at") @db.Timestamptz(6)
+  reminderAt        DateTime?         @map("reminder_at") @db.Timestamptz(6)
+  archivedAt        DateTime?         @map("archived_at") @db.Timestamptz(6)
+  archivedByUserId  String?           @map("archived_by_user_id") @db.Uuid
+  createdAt         DateTime          @default(now()) @map("created_at") @db.Timestamptz(6)
+  updatedAt         DateTime          @updatedAt @map("updated_at") @db.Timestamptz(6)
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  assigneeUser      User?             @relation("TaskAssignee", fields: [assigneeUserId], references: [id], onDelete: SetNull)
+  createdByUser     User?             @relation("TaskCreator", fields: [createdByUserId], references: [id], onDelete: SetNull)
+  archivedByUser    User?             @relation("TaskArchiver", fields: [archivedByUserId], references: [id], onDelete: SetNull)
+  comments          TaskComment[]
+  files             TaskFile[]
+  activityLogs      TaskActivityLog[]
 
   @@index([workspaceId, assigneeUserId, status])
+  @@index([workspaceId, archivedAt, status])
   @@index([workspaceId, dueAt])
   @@map("tasks")
 }
@@ -656,4 +671,64 @@ model TagAssignment {
 
   @@unique([workspaceId, tagId, entityType, entityId])
   @@map("tag_assignments")
+}
+
+// Phase 2V Prisma models. Paste these into prisma/schema.prisma.
+// Assumes existing models: Workspace, User, Task.
+
+model TaskComment {
+  id           String   @id @default(uuid()) @db.Uuid
+  workspaceId  String   @map("workspace_id") @db.Uuid
+  taskId       String   @map("task_id") @db.Uuid
+  authorUserId String?  @map("author_user_id") @db.Uuid
+  body         String
+  createdAt    DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  author    User?     @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, taskId, createdAt])
+  @@map("task_comments")
+}
+
+model TaskFile {
+  id               String   @id @default(uuid()) @db.Uuid
+  workspaceId      String   @map("workspace_id") @db.Uuid
+  taskId           String   @map("task_id") @db.Uuid
+  uploadedByUserId String?  @map("uploaded_by_user_id") @db.Uuid
+  fileName         String   @map("file_name")
+  mimeType         String   @default("application/octet-stream") @map("mime_type")
+  sizeBytes        BigInt   @default(0) @map("size_bytes")
+  storageKey       String?  @map("storage_key")
+  createdAt        DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task       Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  uploadedBy User?     @relation(fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, taskId, createdAt])
+  @@map("task_files")
+}
+
+model TaskActivityLog {
+  id             String   @id @default(uuid()) @db.Uuid
+  workspaceId    String   @map("workspace_id") @db.Uuid
+  taskId         String   @map("task_id") @db.Uuid
+  actorUserId    String?  @map("actor_user_id") @db.Uuid
+  action         String
+  label          String
+  description    String
+  tone           String   @default("slate")
+  oldValuesJsonb Json?    @map("old_values_jsonb")
+  newValuesJsonb Json?    @map("new_values_jsonb")
+  metaJsonb      Json     @default("{}") @map("meta_jsonb")
+  createdAt      DateTime @default(now()) @map("created_at") @db.Timestamptz(6)
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  task      Task      @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  actor     User?     @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([workspaceId, taskId, createdAt])
+  @@map("task_activity_logs")
 }

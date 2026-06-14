@@ -99,4 +99,12 @@ export class RecordRepository {
       include: recordInclude,
     });
   }
+  
+  delete(recordId: string) {
+    return this.prisma.record.delete({
+      where: {
+        id: recordId,
+      },
+    });
+  }
 }

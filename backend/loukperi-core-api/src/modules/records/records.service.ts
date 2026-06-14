@@ -290,6 +290,48 @@ export class RecordsService {
     };
   }
 
+  async remove(
+    workspaceId: string | undefined,
+    currentUser: CurrentUserPayload | undefined,
+    recordId: string,
+  ) {
+    const resolvedWorkspaceId = this.resolveWorkspaceId(workspaceId, currentUser);
+
+    const existing = await this.recordRepository.findOne(
+      resolvedWorkspaceId,
+      recordId,
+    );
+
+    if (!existing) {
+      throw new NotFoundException('Record not found');
+    }
+
+    const deleted = await this.recordRepository.delete(recordId);
+
+    await this.logRecordActivity({
+      workspaceId: resolvedWorkspaceId,
+      recordId,
+      actorUserId: this.resolveActorUserId(currentUser),
+      eventType: 'record.deleted',
+      eventLabel: 'Record deleted',
+      oldValuesJsonb: {
+        title: existing.title,
+        code: existing.code,
+        priority: existing.priority,
+        statusId: existing.statusId,
+        assigneeUserId: existing.assigneeUserId,
+      } as Prisma.InputJsonValue,
+      metaJsonb: {
+        source: 'api',
+      } as Prisma.InputJsonValue,
+    });
+
+    return {
+      id: deleted.id,
+      deleted: true,
+    };
+  }
+
   async removeTag(
     workspaceId: string | undefined,
     currentUser: CurrentUserPayload | undefined,
